@@ -1,0 +1,216 @@
+import React, { useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  Pressable,
+  Animated,
+  Dimensions,
+  PanResponder,
+} from 'react-native';
+import { colors, font, spacing, radius, recoveryColor } from '@/utils/theme';
+import { formatDistanceToNow } from 'date-fns';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const SHEET_HEIGHT = 260;
+
+interface MuscleFatigueData {
+  muscle_group: string;
+  recovery_pct: number;
+  last_trained_at: string | null;
+}
+
+interface MuscleDetailSheetProps {
+  visible: boolean;
+  muscle: string | null;
+  fatigueMap: MuscleFatigueData[];
+  onClose: () => void;
+}
+
+const MUSCLE_LABELS: Record<string, string> = {
+  chest: 'Chest',
+  front_delts: 'Front Delts',
+  side_delts: 'Side Delts',
+  rear_delts: 'Rear Delts',
+  lats: 'Lats',
+  traps: 'Traps',
+  biceps: 'Biceps',
+  triceps: 'Triceps',
+  forearms: 'Forearms',
+  abs: 'Abs',
+  quads: 'Quads',
+  hamstrings: 'Hamstrings',
+  glutes: 'Glutes',
+  calves: 'Calves',
+};
+
+function getStatus(pct: number): string {
+  if (pct >= 80) return 'Ready to train';
+  if (pct >= 50) return 'Recovering';
+  return 'Needs rest';
+}
+
+export default function MuscleDetailSheet({
+  visible,
+  muscle,
+  fatigueMap,
+  onClose,
+}: MuscleDetailSheetProps) {
+  const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(translateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 20,
+        stiffness: 200,
+      }).start();
+    } else {
+      Animated.timing(translateY, {
+        toValue: SHEET_HEIGHT,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 5,
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) translateY.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80 || g.vy > 0.5) {
+          onClose();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 20,
+            stiffness: 200,
+          }).start();
+        }
+      },
+    }),
+  ).current;
+
+  const entry = fatigueMap.find((m) => m.muscle_group === muscle);
+  const recovery = entry?.recovery_pct ?? 100;
+  const color = recoveryColor(recovery);
+  const status = getStatus(recovery);
+  const label = muscle ? MUSCLE_LABELS[muscle] ?? muscle : '';
+  const lastTrained = entry?.last_trained_at
+    ? formatDistanceToNow(new Date(entry.last_trained_at), { addSuffix: true })
+    : 'Never';
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={styles.overlay} onPress={onClose}>
+        <Animated.View
+          style={[styles.sheet, { transform: [{ translateY }] }]}
+          {...panResponder.panHandlers}
+        >
+          <Pressable>
+            <View style={styles.handleBar} />
+
+            <Text style={styles.muscleName}>{label}</Text>
+
+            <View style={styles.recoveryRow}>
+              <Text style={[styles.recoveryPct, { color }]}>{recovery}%</Text>
+              <Text style={[styles.statusText, { color }]}>{status}</Text>
+            </View>
+
+            <View style={styles.recoveryBar}>
+              <View
+                style={[
+                  styles.recoveryFill,
+                  { width: `${recovery}%`, backgroundColor: color },
+                ]}
+              />
+            </View>
+
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Last Trained</Text>
+              <Text style={styles.infoValue}>{lastTrained}</Text>
+            </View>
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: colors.bg.card,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    paddingTop: spacing.md,
+    minHeight: SHEET_HEIGHT,
+  },
+  handleBar: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.text.tertiary,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  muscleName: {
+    fontSize: font.xxl,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  recoveryRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  recoveryPct: {
+    fontSize: font.display,
+    fontWeight: '800',
+  },
+  statusText: {
+    fontSize: font.md,
+    fontWeight: '600',
+  },
+  recoveryBar: {
+    height: 6,
+    backgroundColor: colors.bg.input,
+    borderRadius: 3,
+    marginTop: spacing.md,
+    overflow: 'hidden',
+  },
+  recoveryFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+  },
+  infoLabel: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+  },
+  infoValue: {
+    fontSize: font.md,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+});
