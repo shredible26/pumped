@@ -26,14 +26,30 @@ export function useAuth() {
     useAuthStore();
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        const p = await fetchProfile(session.user.id);
-        setProfile(p);
+    let cancelled = false;
+
+    const init = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
+        setSession(session);
+        if (session?.user) {
+          const p = await fetchProfile(session.user.id);
+          if (cancelled) return;
+          setProfile(p);
+        }
+      } catch (e) {
+        if (!cancelled) setSession(null);
+      } finally {
+        if (!cancelled) setInitialized(true);
       }
-      setInitialized(true);
-    });
+    };
+
+    init();
+
+    const timeout = setTimeout(() => {
+      if (!cancelled) setInitialized(true);
+    }, 4000);
 
     const {
       data: { subscription },
@@ -47,7 +63,11 @@ export function useAuth() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string) => {

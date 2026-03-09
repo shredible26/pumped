@@ -6,7 +6,7 @@ import { recoveryColor } from '@/utils/theme';
 
 interface MuscleData {
   muscle_group: string;
-  recovery_pct: number;
+  recovery_pct: number | null;
   last_trained_at: string | null;
 }
 
@@ -92,9 +92,10 @@ const BODY_OUTLINE_BACK = `
   C95 52 98 48 98 42 L98 32 C98 22 90 16 75 16 Z
 `;
 
-function getRecovery(fatigueMap: MuscleData[], muscle: string): number {
+function getRecovery(fatigueMap: MuscleData[], muscle: string): number | null {
   const entry = fatigueMap.find((m) => m.muscle_group === muscle);
-  return entry?.recovery_pct ?? 100;
+  if (!entry) return null;
+  return entry.recovery_pct;
 }
 
 function MuscleEllipse({
@@ -103,10 +104,11 @@ function MuscleEllipse({
   onPress,
 }: {
   region: MuscleRegion;
-  recovery: number;
+  recovery: number | null;
   onPress: () => void;
 }) {
   const color = recoveryColor(recovery);
+  const isNoData = recovery === null;
   return (
     <Ellipse
       cx={region.cx}
@@ -114,10 +116,10 @@ function MuscleEllipse({
       rx={region.rx}
       ry={region.ry}
       fill={color}
-      fillOpacity={0.45}
+      fillOpacity={isNoData ? 0.25 : 0.45}
       stroke={color}
-      strokeWidth={1.2}
-      strokeOpacity={0.7}
+      strokeWidth={isNoData ? 0.8 : 1.2}
+      strokeOpacity={isNoData ? 0.4 : 0.7}
       onPress={onPress}
     />
   );
@@ -196,6 +198,10 @@ export default function BodyMap({ fatigueMap, onSelectMuscle }: BodyMapProps) {
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: colors.recovery.fatigued }]} />
           <Text style={styles.legendText}>Fatigued</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: colors.recovery.noData }]} />
+          <Text style={styles.legendText}>No data</Text>
         </View>
       </View>
     </View>

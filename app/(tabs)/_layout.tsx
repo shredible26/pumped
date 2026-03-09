@@ -26,25 +26,25 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: 'Today',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="history"
+        name="progress"
         options={{
-          title: 'History',
+          title: 'Progress',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="time" size={size} color={color} />
+            <Ionicons name="trending-up" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="strength"
+        name="workouts"
         options={{
-          title: 'Strength',
+          title: 'Workouts',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="barbell" size={size} color={color} />
           ),
@@ -59,6 +59,9 @@ export default function TabsLayout() {
           ),
         }}
       />
+      {/* Hide old tabs that still exist as files */}
+      <Tabs.Screen name="history" options={{ href: null }} />
+      <Tabs.Screen name="strength" options={{ href: null }} />
     </Tabs>
   );
 }

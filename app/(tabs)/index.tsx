@@ -9,26 +9,58 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { colors, font, spacing, radius, recoveryColor } from '@/utils/theme';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  format,
+  startOfWeek,
+  addDays,
+  isSameDay,
+  isToday,
+} from 'date-fns';
+import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useFatigue } from '@/hooks/useFatigue';
 import { supabase } from '@/services/supabase';
 import { Profile } from '@/types/user';
-import { AIWorkoutPlan } from '@/types/workout';
 import BodyMap from '@/components/home/BodyMap';
 import MuscleDetailSheet from '@/components/home/MuscleDetailSheet';
 
-export default function HomeScreen() {
+const PROGRAM_LABELS: Record<string, string> = {
+  ppl: 'Push/Pull/Legs',
+  upper_lower: 'Upper/Lower',
+  bro_split: 'Bro Split',
+  full_body: 'Full Body',
+  ai_optimal: 'AI Optimal',
+};
+
+const PPL_ROTATION = ['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Legs', 'Rest'];
+const UL_ROTATION = ['Upper', 'Lower', 'Rest', 'Upper', 'Lower', 'Rest', 'Rest'];
+const BRO_ROTATION = ['Chest/Tris', 'Back/Bis', 'Shoulders', 'Legs', 'Arms', 'Rest', 'Rest'];
+const FB_ROTATION = ['Full Body', 'Rest', 'Full Body', 'Rest', 'Full Body', 'Rest', 'Rest'];
+
+function getTodayWorkoutType(programStyle: string | undefined): string {
+  const dayOfWeek = new Date().getDay();
+  switch (programStyle) {
+    case 'ppl': return PPL_ROTATION[dayOfWeek] ?? 'Push';
+    case 'upper_lower': return UL_ROTATION[dayOfWeek] ?? 'Upper';
+    case 'bro_split': return BRO_ROTATION[dayOfWeek] ?? 'Chest/Tris';
+    case 'full_body': return FB_ROTATION[dayOfWeek] ?? 'Full Body';
+    case 'ai_optimal': return 'AI Workout';
+    default: return 'Workout';
+  }
+}
+
+export default function TodayScreen() {
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
 
-  const { fatigueMap, refreshFatigue, loading: fatigueLoading } = useFatigue();
-  const [todayPlan, setTodayPlan] = useState<AIWorkoutPlan | null>(null);
+  const { fatigueMap, refreshFatigue } = useFatigue();
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [workoutDaysThisWeek, setWorkoutDaysThisWeek] = useState<string[]>([]);
 
   const fetchProfile = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -40,24 +72,25 @@ export default function HomeScreen() {
     if (data) setProfile(data as Profile);
   }, [session?.user?.id]);
 
-  const fetchTodayPlan = useCallback(async () => {
+  const fetchWeekWorkouts = useCallback(async () => {
     if (!session?.user?.id) return;
-    const today = new Date().toISOString().split('T')[0];
+    const weekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
+    const weekEnd = addDays(weekStart, 6);
     const { data } = await supabase
-      .from('ai_workout_plans')
-      .select('*')
+      .from('workout_sessions')
+      .select('date')
       .eq('user_id', session.user.id)
-      .eq('plan_date', today)
-      .eq('used', false)
-      .order('generated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    setTodayPlan(data as AIWorkoutPlan | null);
+      .eq('completed', true)
+      .gte('date', format(weekStart, 'yyyy-MM-dd'))
+      .lte('date', format(weekEnd, 'yyyy-MM-dd'));
+    if (data) {
+      setWorkoutDaysThisWeek(data.map((d: any) => d.date));
+    }
   }, [session?.user?.id]);
 
   const loadData = useCallback(async () => {
-    await Promise.all([fetchProfile(), refreshFatigue(), fetchTodayPlan()]);
-  }, [fetchProfile, refreshFatigue, fetchTodayPlan]);
+    await Promise.all([fetchProfile(), refreshFatigue(), fetchWeekWorkouts()]);
+  }, [fetchProfile, refreshFatigue, fetchWeekWorkouts]);
 
   useEffect(() => {
     loadData();
@@ -74,35 +107,20 @@ export default function HomeScreen() {
     setSheetVisible(true);
   }, []);
 
-  const handleCloseSheet = useCallback(() => {
-    setSheetVisible(false);
-  }, []);
-
   const streak = profile?.current_streak_days ?? 0;
   const totalWorkouts = profile?.total_workouts ?? 0;
-  const strengthScore = profile?.strength_score ?? 0;
-  const squat = profile?.squat_e1rm ?? 0;
-  const bench = profile?.bench_e1rm ?? 0;
-  const deadlift = profile?.deadlift_e1rm ?? 0;
   const trainingFreq = profile?.training_frequency ?? 0;
-  const programStyle = profile?.program_style;
+  const firstName = profile?.display_name?.split(' ')[0] ?? 'there';
+  const todayType = getTodayWorkoutType(profile?.program_style);
+  const isRestDay = todayType === 'Rest';
+  const programLabel = profile?.program_style
+    ? PROGRAM_LABELS[profile.program_style] ?? ''
+    : '';
 
-  const programLabel =
-    programStyle === 'ppl'
-      ? 'PPL'
-      : programStyle === 'upper_lower'
-        ? 'Upper/Lower'
-        : programStyle === 'bro_split'
-          ? 'Bro Split'
-          : programStyle === 'full_body'
-            ? 'Full Body'
-            : programStyle === 'ai_optimal'
-              ? 'AI'
-              : '';
+  const weekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-  const programColor = programStyle
-    ? colors.program[programStyle] ?? colors.accent.primary
-    : colors.accent.primary;
+  const weekWorkoutCount = workoutDaysThisWeek.length;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -116,113 +134,118 @@ export default function HomeScreen() {
           />
         }
       >
-        {/* Top bar */}
-        <View style={styles.topBar}>
-          <Text style={styles.logo}>
-            <Text style={styles.logoAccent}>P</Text>UMPED
+        {/* Weekly Calendar Strip */}
+        <View style={styles.calendarStrip}>
+          {weekDays.map((day) => {
+            const today = isToday(day);
+            const hasWorkout = workoutDaysThisWeek.includes(
+              format(day, 'yyyy-MM-dd'),
+            );
+            return (
+              <View
+                key={day.toISOString()}
+                style={[styles.calendarDay, today && styles.calendarDayToday]}
+              >
+                <Text
+                  style={[
+                    styles.calendarDayLabel,
+                    today && styles.calendarDayLabelToday,
+                  ]}
+                >
+                  {format(day, 'EEE').toUpperCase()}
+                </Text>
+                <Text
+                  style={[
+                    styles.calendarDate,
+                    today && styles.calendarDateToday,
+                  ]}
+                >
+                  {format(day, 'd')}
+                </Text>
+                {hasWorkout && <View style={styles.calendarDot} />}
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Welcome Message */}
+        <View style={styles.welcomeSection}>
+          <Text style={styles.welcomeText}>Welcome, {firstName}</Text>
+          <Text style={styles.welcomeSubtext}>
+            {isRestDay
+              ? 'Rest day — recover and grow'
+              : `${todayType} day scheduled`}
           </Text>
-          <View style={styles.streakBadge}>
-            <Text style={styles.streakText}>
-              {streak > 0 ? `🔥 ${streak} Day Streak` : '0 Day Streak'}
-            </Text>
-          </View>
         </View>
 
         {/* Today's Workout Card */}
-        <Pressable
-          style={styles.todayCard}
-          onPress={() =>
-            todayPlan
-              ? router.push('/workout/preview')
-              : router.push('/workout/custom')
-          }
-        >
-          <View style={styles.todayHeader}>
-            <Text style={styles.todayLabel}>TODAY'S WORKOUT</Text>
-            {programLabel ? (
-              <View style={[styles.programTag, { backgroundColor: programColor + '20' }]}>
-                <Text style={[styles.programTagText, { color: programColor }]}>
-                  {programLabel}
-                </Text>
+        {!isRestDay && (
+          <View style={styles.workoutCard}>
+            <View style={styles.workoutCardHeader}>
+              <View style={styles.scheduledBadge}>
+                <Text style={styles.scheduledBadgeText}>SCHEDULED</Text>
               </View>
-            ) : null}
-          </View>
-          {todayPlan ? (
-            <>
-              <Text style={styles.todayTitle}>{todayPlan.workout_name}</Text>
-              <Text style={styles.todayMeta}>
-                {Array.isArray(todayPlan.exercises)
-                  ? `${todayPlan.exercises.length} exercises`
-                  : ''}{' '}
-                · ~
-                {Array.isArray(todayPlan.exercises)
-                  ? Math.round(todayPlan.exercises.length * 8)
-                  : 0}{' '}
-                min
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.todayTitle}>No workout planned</Text>
-              <Text style={styles.todayMeta}>
-                Tap to log a custom workout, or wait for AI to generate one
-              </Text>
-            </>
-          )}
-          <View style={styles.playButton}>
-            <Text style={styles.playIcon}>▶</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => router.push('/workout/custom')}>
-          <Text style={styles.customLink}>or log a custom workout</Text>
-        </Pressable>
-
-        {/* Strength Score Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>STRENGTH SCORE</Text>
-          {strengthScore > 0 ? (
-            <>
-              <Text style={styles.scoreNumber}>
-                {strengthScore.toLocaleString()}
-              </Text>
-              <View style={styles.liftBreakdown}>
-                {squat > 0 && (
-                  <View style={styles.liftItem}>
-                    <Text style={styles.liftValue}>{squat}</Text>
-                    <Text style={styles.liftLabel}>Squat</Text>
-                  </View>
-                )}
-                {squat > 0 && bench > 0 && <View style={styles.liftDivider} />}
-                {bench > 0 && (
-                  <View style={styles.liftItem}>
-                    <Text style={styles.liftValue}>{bench}</Text>
-                    <Text style={styles.liftLabel}>Bench</Text>
-                  </View>
-                )}
-                {bench > 0 && deadlift > 0 && (
-                  <View style={styles.liftDivider} />
-                )}
-                {deadlift > 0 && (
-                  <View style={styles.liftItem}>
-                    <Text style={styles.liftValue}>{deadlift}</Text>
-                    <Text style={styles.liftLabel}>Deadlift</Text>
-                  </View>
-                )}
+              <View style={styles.workoutIconBox}>
+                <Ionicons name="barbell" size={18} color={colors.accent.primary} />
               </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.scoreNumber}>—</Text>
-              <Text style={styles.cardSubtext}>
-                Log your first squat, bench, or deadlift to see your score
-              </Text>
-            </>
-          )}
-        </View>
+            </View>
 
-        {/* Muscle Readiness Card */}
+            <Text style={styles.workoutType}>{todayType}</Text>
+            <View style={styles.programRow}>
+              <Text style={styles.programName}>{programLabel}</Text>
+              <Ionicons
+                name="chevron-down"
+                size={14}
+                color={colors.text.tertiary}
+              />
+            </View>
+
+            <Pressable
+              style={styles.startButton}
+              onPress={() => router.push('/workout/preview')}
+            >
+              <Ionicons name="play" size={18} color={colors.text.inverse} />
+              <Text style={styles.startButtonText}>Start Workout</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.speedLogButton}
+              onPress={() => router.push('/speedlog')}
+            >
+              <Ionicons
+                name="flash"
+                size={18}
+                color={colors.text.primary}
+              />
+              <Text style={styles.speedLogButtonText}>Speed Log</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {isRestDay && (
+          <View style={styles.restCard}>
+            <Text style={styles.restEmoji}>🧘</Text>
+            <Text style={styles.restTitle}>Rest Day</Text>
+            <Text style={styles.restSubtext}>
+              Your muscles are recovering. Come back stronger tomorrow.
+            </Text>
+            <Pressable
+              style={styles.speedLogButton}
+              onPress={() => router.push('/speedlog')}
+            >
+              <Ionicons name="flash" size={18} color={colors.text.primary} />
+              <Text style={styles.speedLogButtonText}>
+                Log a workout anyway
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Muscle Readiness */}
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>MUSCLE READINESS</Text>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardLabel}>MUSCLE READINESS</Text>
+          </View>
           <BodyMap
             fatigueMap={fatigueMap}
             onSelectMuscle={handleSelectMuscle}
@@ -237,14 +260,15 @@ export default function HomeScreen() {
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>
-              {/* Week progress: we'd need to count sessions this week */}
-              0/{trainingFreq}
+              {streak > 0 ? `🔥 ${streak}` : '0'}
             </Text>
-            <Text style={styles.statLabel}>This Week</Text>
+            <Text style={styles.statLabel}>Streak</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>0</Text>
-            <Text style={styles.statLabel}>PRs</Text>
+            <Text style={styles.statNumber}>
+              {weekWorkoutCount}/{trainingFreq}
+            </Text>
+            <Text style={styles.statLabel}>This Week</Text>
           </View>
         </View>
 
@@ -255,7 +279,7 @@ export default function HomeScreen() {
         visible={sheetVisible}
         muscle={selectedMuscle}
         fatigueMap={fatigueMap}
-        onClose={handleCloseSheet}
+        onClose={() => setSheetVisible(false)}
       />
     </SafeAreaView>
   );
@@ -266,99 +290,173 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bg.primary,
   },
-  topBar: {
+
+  calendarStrip: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
   },
-  logo: {
-    fontSize: font.xxl,
-    fontWeight: '800',
-    color: colors.text.primary,
-    letterSpacing: 1,
+  calendarDay: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+    minWidth: 42,
   },
-  logoAccent: {
-    color: colors.accent.primary,
-  },
-  streakBadge: {
-    backgroundColor: colors.accent.bg,
-    borderRadius: radius.xl,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+  calendarDayToday: {
+    backgroundColor: colors.bg.card,
     borderWidth: 1,
     borderColor: colors.accent.border,
   },
-  streakText: {
+  calendarDayLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    letterSpacing: 0.5,
+  },
+  calendarDayLabelToday: {
     color: colors.accent.primary,
-    fontSize: font.sm,
+  },
+  calendarDate: {
+    fontSize: font.lg,
     fontWeight: '600',
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  calendarDateToday: {
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  calendarDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.accent.primary,
+    marginTop: 3,
   },
 
-  todayCard: {
-    backgroundColor: colors.bg.card,
-    marginHorizontal: spacing.xl,
-    marginTop: spacing.lg,
-    padding: spacing.xl,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.accent.border,
-    position: 'relative',
+  welcomeSection: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
   },
-  todayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  todayLabel: {
-    fontSize: font.xs,
-    fontWeight: '700',
-    color: colors.accent.primary,
-    letterSpacing: 1,
-  },
-  programTag: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  programTagText: {
-    fontSize: font.xs,
-    fontWeight: '700',
-  },
-  todayTitle: {
-    fontSize: font.xl,
+  welcomeText: {
+    fontSize: font.xxxl,
     fontWeight: '700',
     color: colors.text.primary,
   },
-  todayMeta: {
-    fontSize: font.sm,
+  welcomeSubtext: {
+    fontSize: font.md,
     color: colors.text.secondary,
     marginTop: spacing.xs,
   },
-  playButton: {
-    position: 'absolute',
-    right: spacing.xl,
-    top: '50%',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.accent.primary,
+
+  workoutCard: {
+    backgroundColor: colors.bg.card,
+    marginHorizontal: spacing.xl,
+    padding: spacing.xl,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  workoutCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  scheduledBadge: {
+    backgroundColor: colors.accent.bg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+  },
+  scheduledBadgeText: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.accent.primary,
+    letterSpacing: 1,
+  },
+  workoutIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(74,222,128,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playIcon: {
+  workoutType: {
+    fontSize: font.xxxl,
+    fontWeight: '800',
+    color: colors.text.primary,
+  },
+  programRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  programName: {
+    fontSize: font.sm,
+    color: colors.text.tertiary,
+  },
+  startButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent.primary,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    marginTop: spacing.xl,
+  },
+  startButtonText: {
     color: colors.text.inverse,
     fontSize: font.lg,
-    marginLeft: 2,
+    fontWeight: '700',
   },
-  customLink: {
-    color: colors.text.tertiary,
-    fontSize: font.sm,
+  speedLogButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.primary,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  speedLogButtonText: {
+    color: colors.text.primary,
+    fontSize: font.md,
+    fontWeight: '600',
+  },
+
+  restCard: {
+    backgroundColor: colors.bg.card,
+    marginHorizontal: spacing.xl,
+    padding: spacing.xl,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    alignItems: 'center',
+  },
+  restEmoji: {
+    fontSize: 36,
+  },
+  restTitle: {
+    fontSize: font.xl,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: spacing.sm,
+  },
+  restSubtext: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
     textAlign: 'center',
-    marginTop: spacing.md,
-    textDecorationLine: 'underline',
   },
 
   card: {
@@ -370,46 +468,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.default,
   },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   cardLabel: {
     fontSize: font.xs,
     fontWeight: '700',
     color: colors.text.secondary,
     letterSpacing: 1,
-  },
-  scoreNumber: {
-    fontSize: font.display,
-    fontWeight: '800',
-    color: colors.text.primary,
-    marginTop: spacing.sm,
-  },
-  cardSubtext: {
-    fontSize: font.sm,
-    color: colors.text.tertiary,
-    marginTop: spacing.xs,
-  },
-  liftBreakdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.md,
-    gap: spacing.md,
-  },
-  liftItem: {
-    alignItems: 'center',
-  },
-  liftValue: {
-    fontSize: font.lg,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  liftLabel: {
-    fontSize: font.xs,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
-  liftDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: colors.border.light,
   },
 
   statsRow: {

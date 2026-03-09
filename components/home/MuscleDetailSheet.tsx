@@ -17,7 +17,7 @@ const SHEET_HEIGHT = 260;
 
 interface MuscleFatigueData {
   muscle_group: string;
-  recovery_pct: number;
+  recovery_pct: number | null;
   last_trained_at: string | null;
 }
 
@@ -45,10 +45,11 @@ const MUSCLE_LABELS: Record<string, string> = {
   calves: 'Calves',
 };
 
-function getStatus(pct: number): string {
-  if (pct >= 80) return 'Ready to train';
-  if (pct >= 50) return 'Recovering';
-  return 'Needs rest';
+function getStatus(pct: number | null): string {
+  if (pct === null) return 'No data yet';
+  if (pct >= 80) return 'Ready for heavy work';
+  if (pct >= 50) return 'Light isolation only';
+  return 'Rest this muscle';
 }
 
 export default function MuscleDetailSheet({
@@ -99,7 +100,7 @@ export default function MuscleDetailSheet({
   ).current;
 
   const entry = fatigueMap.find((m) => m.muscle_group === muscle);
-  const recovery = entry?.recovery_pct ?? 100;
+  const recovery = entry?.recovery_pct ?? null;
   const color = recoveryColor(recovery);
   const status = getStatus(recovery);
   const label = muscle ? MUSCLE_LABELS[muscle] ?? muscle : '';
@@ -120,7 +121,9 @@ export default function MuscleDetailSheet({
             <Text style={styles.muscleName}>{label}</Text>
 
             <View style={styles.recoveryRow}>
-              <Text style={[styles.recoveryPct, { color }]}>{recovery}%</Text>
+              <Text style={[styles.recoveryPct, { color }]}>
+                {recovery !== null ? `${recovery}%` : '—'}
+              </Text>
               <Text style={[styles.statusText, { color }]}>{status}</Text>
             </View>
 
@@ -128,7 +131,10 @@ export default function MuscleDetailSheet({
               <View
                 style={[
                   styles.recoveryFill,
-                  { width: `${recovery}%`, backgroundColor: color },
+                  {
+                    width: recovery !== null ? `${recovery}%` : '0%',
+                    backgroundColor: color,
+                  },
                 ]}
               />
             </View>

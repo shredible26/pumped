@@ -16,7 +16,7 @@ export async function initializeFatigue(userId: string): Promise<void> {
   const rows = MUSCLE_GROUPS.map((muscle) => ({
     user_id: userId,
     muscle_group: muscle,
-    recovery_pct: 100,
+    recovery_pct: null,
     volume_load: 0,
     last_trained_at: null,
   }));

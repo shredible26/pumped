@@ -14,6 +14,7 @@ export const colors = {
     ready: '#4ADE80',
     moderate: '#FACC15',
     fatigued: '#EF4444',
+    noData: '#3A3A4A',
   },
   text: {
     primary: '#F5F5F5',
@@ -63,7 +64,8 @@ export const font = {
   display: 42,
 };
 
-export function recoveryColor(pct: number): string {
+export function recoveryColor(pct: number | null): string {
+  if (pct === null || pct === undefined) return colors.recovery.noData;
   if (pct >= 80) return colors.recovery.ready;
   if (pct >= 50) return colors.recovery.moderate;
   return colors.recovery.fatigued;
