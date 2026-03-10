@@ -1,5 +1,4 @@
 import { useState, useCallback } from 'react';
-import { MuscleFatigue } from '@/types/workout';
 import { fetchFatigueMap } from '@/services/fatigue';
 import { calculateRecovery } from '@/utils/recoveryModel';
 import { useAuthStore } from '@/stores/authStore';
@@ -21,14 +20,24 @@ export function useFatigue() {
     setLoading(true);
     try {
       const data = await fetchFatigueMap(session.user.id);
-      const updated: FatigueEntry[] = data.map((m) => ({
-        muscle_group: m.muscle_group,
-        volume_load: m.volume_load ?? 0,
-        last_trained_at: m.last_trained_at ?? null,
-        recovery_pct: m.last_trained_at
-          ? calculateRecovery(m.muscle_group, new Date(m.last_trained_at), m.volume_load ?? 0)
-          : null,
-      }));
+      const updated: FatigueEntry[] = data.map((m) => {
+        const lastAt = m.last_trained_at ?? null;
+        // No last_trained_at => never trained => gray (null), not computed
+        const recovery_pct =
+          lastAt != null
+            ? calculateRecovery(
+                m.muscle_group,
+                new Date(lastAt),
+                Number(m.volume_load) || 0,
+              )
+            : null;
+        return {
+          muscle_group: m.muscle_group,
+          volume_load: Number(m.volume_load) || 0,
+          last_trained_at: lastAt,
+          recovery_pct,
+        };
+      });
       setFatigueMap(updated);
     } finally {
       setLoading(false);

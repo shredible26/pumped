@@ -24,4 +24,7 @@ export interface Profile {
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;
+  /** Daily AI generation credits (optional until migration applied) */
+  generation_credits_remaining?: number | null;
+  credits_reset_date?: string | null;
 }

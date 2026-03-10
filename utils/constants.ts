@@ -18,11 +18,10 @@ export const MUSCLE_GROUPS = [
 export type MuscleGroup = (typeof MUSCLE_GROUPS)[number];
 
 export const PROGRAM_STYLES = [
-  { id: 'ppl', label: 'Push/Pull/Legs', description: 'The classic 6-day split. Each day targets push, pull, or leg muscles.' },
-  { id: 'upper_lower', label: 'Upper/Lower', description: '4-day split alternating upper and lower body.' },
-  { id: 'bro_split', label: 'Bro Split', description: 'Each day dedicated to one muscle group.' },
-  { id: 'full_body', label: 'Full Body', description: 'Hit every muscle group each session, 3x/week.' },
-  { id: 'ai_optimal', label: 'AI Optimal', description: 'Let the AI build your ideal program.' },
+  { id: 'ppl', label: 'Push/Pull/Legs', description: 'Classic 6-day split with AI-generated workouts' },
+  { id: 'upper_lower', label: 'Upper/Lower', description: '4-day split with AI-powered exercise selection' },
+  { id: 'aesthetic', label: 'Aesthetic', description: 'Optimized with AI for aesthetics and proportions' },
+  { id: 'ai_optimal', label: 'AI Optimal', description: 'Fully balanced and optimized by AI, hitting every muscle group' },
 ] as const;
 
 export const EQUIPMENT_OPTIONS = [

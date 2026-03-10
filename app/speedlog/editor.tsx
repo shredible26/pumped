@@ -19,7 +19,7 @@ import { REST_DURATIONS } from '@/utils/constants';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchExercises } from '@/services/exercises';
 import { createSession, insertSetLogs, completeSession } from '@/services/workouts';
-import { updateMuscleFatigue } from '@/services/fatigue';
+import { applyWorkoutFatigue } from '@/services/fatigue';
 import { supabase } from '@/services/supabase';
 import { Exercise } from '@/types/exercise';
 import { e1rm } from '@/utils/epley';
@@ -198,17 +198,15 @@ export default function SpeedLogEditorScreen() {
       });
 
       const setLogs: any[] = [];
-      const trainedMuscles = new Map<string, number>();
+      const contributions: { primary_muscle: string | null; secondary_muscles?: string[]; volume: number }[] = [];
 
       exercises.forEach((ex, exIdx) => {
+        let exVol = 0;
         ex.sets.forEach((set, setIdx) => {
           const w = parseFloat(set.weight) || 0;
           const r = parseInt(set.reps, 10) || 0;
           const vol = w * r;
-          const muscle = ex.exercise.primary_muscle;
-          if (muscle) {
-            trainedMuscles.set(muscle, (trainedMuscles.get(muscle) ?? 0) + vol);
-          }
+          exVol += vol;
           setLogs.push({
             session_id: ws.id,
             exercise_id: ex.exercise.id,
@@ -222,15 +220,18 @@ export default function SpeedLogEditorScreen() {
             is_pr: false,
           });
         });
+        contributions.push({
+          primary_muscle: ex.exercise.primary_muscle ?? null,
+          secondary_muscles: ex.exercise.secondary_muscles,
+          volume: exVol,
+        });
       });
 
       if (setLogs.length > 0) {
         await insertSetLogs(setLogs).catch(() => {});
       }
 
-      for (const [muscle, vol] of trainedMuscles) {
-        await updateMuscleFatigue(userId, muscle, vol).catch(() => {});
-      }
+      await applyWorkoutFatigue(userId, contributions).catch(() => {});
 
       const prevTotal = profile?.total_workouts ?? 0;
       const prevStreak = profile?.current_streak_days ?? 0;

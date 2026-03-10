@@ -21,11 +21,10 @@ import { PROGRAM_STYLES, EQUIPMENT_OPTIONS } from '@/utils/constants';
 import { colors, font, spacing, radius } from '@/utils/theme';
 
 const PROGRAM_COLORS: Record<string, string> = {
-  ppl: colors.program.ppl,
-  upper_lower: colors.program.upper_lower,
-  bro_split: colors.program.bro_split,
-  full_body: colors.program.full_body,
-  ai_optimal: colors.program.ai_optimal,
+  ppl: '#8B5CF6',
+  upper_lower: '#3B82F6',
+  aesthetic: '#EC4899',
+  ai_optimal: '#4ADE80',
 };
 
 export default function OnboardingScreen() {

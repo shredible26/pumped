@@ -8,13 +8,14 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { colors, font, spacing, radius } from '@/utils/theme';
-import { useWorkoutStore, CompletedSet } from '@/stores/workoutStore';
+import { useWorkoutStore } from '@/stores/workoutStore';
 import { useAuthStore } from '@/stores/authStore';
 import { completeSession, insertSetLogs } from '@/services/workouts';
-import { updateMuscleFatigue } from '@/services/fatigue';
+import { applyWorkoutFatigue } from '@/services/fatigue';
+import { fetchExercises } from '@/services/exercises';
 import { supabase } from '@/services/supabase';
 import { e1rm } from '@/utils/epley';
 import { clearActiveWorkout } from '@/utils/storage';
@@ -33,8 +34,11 @@ interface SummaryData {
 
 export default function WorkoutSummaryScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ sessionId?: string }>();
+  const urlSessionId = params.sessionId;
+
   const {
-    sessionId,
+    sessionId: storeSessionId,
     workoutName,
     exercises,
     completedSets,
@@ -42,16 +46,71 @@ export default function WorkoutSummaryScreen() {
     reset,
   } = useWorkoutStore();
 
+  const sessionId = urlSessionId ?? storeSessionId;
+  const fromLogFlow = !!urlSessionId;
+
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
 
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [saving, setSaving] = useState(true);
+  const [displayName, setDisplayName] = useState(workoutName);
+
+  const loadSummaryFromSession = useCallback(async (sid: string) => {
+    if (!session?.user?.id) {
+      setSaving(false);
+      return;
+    }
+    try {
+      const { data: sessionData } = await supabase
+        .from('workout_sessions')
+        .select('*')
+        .eq('id', sid)
+        .single();
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+      if (sessionData) setDisplayName(sessionData.name);
+      if (profileData) setProfile(profileData as any);
+
+      const durationMin = sessionData?.duration_seconds
+        ? Math.round(sessionData.duration_seconds / 60)
+        : 0;
+      const totalVolume = Number(sessionData?.total_volume ?? 0);
+      const exerciseCount = sessionData?.exercise_count ?? 0;
+      const setCount = sessionData?.set_count ?? 0;
+      const prCount = sessionData?.pr_count ?? 0;
+      const streak = profileData?.current_streak_days ?? 0;
+      const newScore = profileData?.strength_score ?? 0;
+
+      setSummary({
+        duration: durationMin,
+        totalVolume,
+        exerciseCount,
+        setCount,
+        prCount,
+        prs: [],
+        newStrengthScore: newScore > 0 ? newScore : null,
+        prevStrengthScore: null,
+        streak,
+      });
+    } catch (err) {
+      console.warn('Load summary error:', err);
+    } finally {
+      setSaving(false);
+    }
+  }, [session?.user?.id, setProfile]);
 
   useEffect(() => {
-    finalizeWorkout();
-  }, []);
+    if (fromLogFlow && urlSessionId) {
+      loadSummaryFromSession(urlSessionId);
+    } else {
+      finalizeWorkout();
+    }
+  }, [fromLogFlow, urlSessionId]);
 
   const finalizeWorkout = useCallback(async () => {
     if (!session?.user?.id || !sessionId) {
@@ -68,7 +127,7 @@ export default function WorkoutSummaryScreen() {
 
       let totalVolume = 0;
       const setLogs: any[] = [];
-      const trainedMuscles = new Map<string, number>();
+      const volByExIndex = new Map<number, number>();
 
       for (const cs of completedSets) {
         const ex = exercises[cs.exerciseIndex];
@@ -76,11 +135,7 @@ export default function WorkoutSummaryScreen() {
 
         const vol = cs.weight * cs.reps;
         totalVolume += vol;
-
-        const muscle = ex.primary_muscle;
-        if (muscle) {
-          trainedMuscles.set(muscle, (trainedMuscles.get(muscle) ?? 0) + vol);
-        }
+        volByExIndex.set(cs.exerciseIndex, (volByExIndex.get(cs.exerciseIndex) ?? 0) + vol);
 
         setLogs.push({
           session_id: sessionId,
@@ -151,11 +206,25 @@ export default function WorkoutSummaryScreen() {
         pr_count: prs.length,
       }).catch((e) => console.warn('Failed to complete session:', e));
 
-      // Update muscle fatigue
-      for (const [muscle, vol] of trainedMuscles) {
-        await updateMuscleFatigue(userId, muscle, vol).catch((e) =>
-          console.warn('Failed to update fatigue:', e),
-        );
+      // Update muscle fatigue (primary + 50% secondary volume)
+      try {
+        const exList = await fetchExercises();
+        const byId = new Map(exList.map((e) => [e.id, e]));
+        const contributions: { primary_muscle: string | null; secondary_muscles?: string[]; volume: number }[] = [];
+        for (let i = 0; i < exercises.length; i++) {
+          const vol = volByExIndex.get(i) ?? 0;
+          if (vol <= 0) continue;
+          const ex = exercises[i];
+          const full = byId.get(ex.exercise_id);
+          contributions.push({
+            primary_muscle: ex.primary_muscle || full?.primary_muscle || null,
+            secondary_muscles: full?.secondary_muscles,
+            volume: vol,
+          });
+        }
+        await applyWorkoutFatigue(userId, contributions);
+      } catch (e) {
+        console.warn('Failed to update fatigue:', e);
       }
 
       // Update profile
@@ -252,7 +321,7 @@ export default function WorkoutSummaryScreen() {
       >
         <Text style={styles.emoji}>💪</Text>
         <Text style={styles.title}>Workout Complete!</Text>
-        <Text style={styles.subtitle}>{workoutName || 'Great session'}</Text>
+        <Text style={styles.subtitle}>{displayName || workoutName || 'Great session'}</Text>
 
         {/* Stats Grid */}
         <View style={styles.statsGrid}>

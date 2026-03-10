@@ -1,0 +1,776 @@
+import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  Modal,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, font, spacing, radius } from '@/utils/theme';
+import { useAuthStore } from '@/stores/authStore';
+import { getTodaysPlan } from '@/services/ai';
+import { fetchExercises } from '@/services/exercises';
+import {
+  createSession,
+  insertSetLogs,
+  completeSession,
+} from '@/services/workouts';
+import { applyWorkoutFatigue } from '@/services/fatigue';
+import { supabase } from '@/services/supabase';
+import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
+import { Exercise } from '@/types/exercise';
+
+interface LogSet {
+  weight: string;
+  reps: string;
+}
+
+interface LogExercise {
+  exercise_id: string;
+  name: string;
+  primary_muscle: string;
+  sets: LogSet[];
+}
+
+function planToLogExercises(plan: GeneratedWorkout): LogExercise[] {
+  return (plan.exercises ?? []).map((ex) => ({
+    exercise_id: ex.exercise_id,
+    name: ex.name,
+    primary_muscle: ex.primary_muscle ?? '',
+    sets: Array.from({ length: ex.sets }, () => ({
+      weight: String(ex.target_weight_lbs ?? 0),
+      reps: ex.target_reps?.split('-')[0] ?? '8',
+    })),
+  }));
+}
+
+export default function WorkoutLogScreen() {
+  const router = useRouter();
+  const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
+  const setProfile = useAuthStore((s) => s.setProfile);
+
+  const [plan, setPlan] = useState<GeneratedWorkout | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exercises, setExercises] = useState<LogExercise[]>([]);
+  const [duration, setDuration] = useState('45');
+  const [saving, setSaving] = useState(false);
+  const [saveModalVisible, setSaveModalVisible] = useState(false);
+  const [saveWorkoutName, setSaveWorkoutName] = useState('');
+  const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
+  const [allExercises, setAllExercises] = useState<Exercise[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editingSet, setEditingSet] = useState<{
+    exIdx: number;
+    setIdx: number;
+  } | null>(null);
+  const [editWeight, setEditWeight] = useState('');
+  const [editReps, setEditReps] = useState('');
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    (async () => {
+      const p = await getTodaysPlan(session.user.id);
+      setPlan(p);
+      if (p) {
+        setExercises(planToLogExercises(p));
+        setDuration(p.estimated_minutes ? String(p.estimated_minutes) : '45');
+      }
+      setLoading(false);
+    })();
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    fetchExercises().then(setAllExercises).catch(() => {});
+  }, []);
+
+  const addSet = (exIdx: number) => {
+    setExercises((prev) =>
+      prev.map((e, i) => {
+        if (i !== exIdx) return e;
+        const last = e.sets[e.sets.length - 1];
+        return {
+          ...e,
+          sets: [...e.sets, { weight: last?.weight ?? '0', reps: last?.reps ?? '8' }],
+        };
+      })
+    );
+  };
+
+  const removeSet = (exIdx: number, setIdx: number) => {
+    setExercises((prev) =>
+      prev.map((e, i) => {
+        if (i !== exIdx || e.sets.length <= 1) return e;
+        return { ...e, sets: e.sets.filter((_, si) => si !== setIdx) };
+      })
+    );
+  };
+
+  const updateSet = (exIdx: number, setIdx: number, weight: string, reps: string) => {
+    setExercises((prev) =>
+      prev.map((e, i) => {
+        if (i !== exIdx) return e;
+        return {
+          ...e,
+          sets: e.sets.map((s, si) =>
+            si === setIdx ? { weight, reps } : s
+          ),
+        };
+      })
+    );
+    setEditingSet(null);
+  };
+
+  const removeExercise = (idx: number) => {
+    setExercises((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const addExercise = (ex: Exercise) => {
+    if (exercises.some((e) => e.exercise_id === ex.id)) return;
+    setExercises((prev) => [
+      ...prev,
+      {
+        exercise_id: ex.id,
+        name: ex.name,
+        primary_muscle: ex.primary_muscle ?? '',
+        sets: [
+          { weight: '135', reps: '8' },
+          { weight: '135', reps: '8' },
+          { weight: '135', reps: '8' },
+        ],
+      },
+    ]);
+    setSearchOpen(false);
+  };
+
+  const totalSets = exercises.reduce((s, e) => s + e.sets.length, 0);
+  const totalVolume = exercises.reduce(
+    (sum, e) =>
+      sum +
+      e.sets.reduce(
+        (s, set) =>
+          s + (parseFloat(set.weight) || 0) * (parseInt(set.reps, 10) || 0),
+        0
+      ),
+    0
+  );
+
+  const handleComplete = useCallback(async () => {
+    if (!session?.user?.id || exercises.length === 0) return;
+    setSaving(true);
+    try {
+      const durationSec = (parseInt(duration, 10) || 45) * 60;
+      const ws = await createSession({
+        user_id: session.user.id,
+        date: new Date().toISOString().split('T')[0],
+        name: plan?.name ?? 'AI Workout',
+        workout_type: (plan?.type ?? null) as any,
+        source: 'ai_generated',
+        exercise_count: exercises.length,
+        set_count: totalSets,
+        total_volume: totalVolume,
+        pr_count: 0,
+        completed: true,
+        started_at: new Date(Date.now() - durationSec * 1000).toISOString(),
+        completed_at: new Date().toISOString(),
+        duration_seconds: durationSec,
+      });
+
+      const setLogs: any[] = [];
+      const contributions: { primary_muscle: string | null; secondary_muscles?: string[]; volume: number }[] = [];
+
+      exercises.forEach((ex, exIdx) => {
+        let exVol = 0;
+        ex.sets.forEach((set, setIdx) => {
+          const w = parseFloat(set.weight) || 0;
+          const r = parseInt(set.reps, 10) || 0;
+          const vol = w * r;
+          exVol += vol;
+          setLogs.push({
+            session_id: ws.id,
+            exercise_id: ex.exercise_id,
+            exercise_name: ex.name,
+            exercise_order: exIdx,
+            set_number: setIdx + 1,
+            actual_weight: w,
+            actual_reps: r,
+            completed: true,
+            is_warmup: false,
+            is_pr: false,
+          });
+        });
+        const full = allExercises.find((e) => e.id === ex.exercise_id);
+        contributions.push({
+          primary_muscle: ex.primary_muscle || full?.primary_muscle || null,
+          secondary_muscles: full?.secondary_muscles,
+          volume: exVol,
+        });
+      });
+
+      await insertSetLogs(setLogs);
+      await completeSession(ws.id, {
+        duration_seconds: durationSec,
+        total_volume: totalVolume,
+        exercise_count: exercises.length,
+        set_count: totalSets,
+      });
+
+      await applyWorkoutFatigue(session.user.id, contributions).catch(() => {});
+
+      const prevTotal = profile?.total_workouts ?? 0;
+      const prevStreak = profile?.current_streak_days ?? 0;
+      await supabase
+        .from('profiles')
+        .update({
+          total_workouts: prevTotal + 1,
+          current_streak_days: prevStreak + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.user.id);
+
+      const { data: updated } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+      if (updated) setProfile(updated as any);
+
+      const today = new Date().toISOString().split('T')[0];
+      await supabase
+        .from('ai_workout_plans')
+        .update({ used: true })
+        .eq('user_id', session.user.id)
+        .eq('plan_date', today);
+
+      setCompletedSessionId(ws.id);
+      setSaveModalVisible(true);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message ?? 'Failed to save workout');
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    session?.user?.id,
+    exercises,
+    duration,
+    totalSets,
+    totalVolume,
+    plan,
+    profile,
+    setProfile,
+  ]);
+
+  const handleSaveWorkout = async () => {
+    if (!session?.user?.id || !completedSessionId) return;
+    try {
+      await supabase.from('saved_workouts').insert({
+        user_id: session.user.id,
+        name: saveWorkoutName || plan?.name || 'My Workout',
+        workout_type: (plan?.type ?? null) as any,
+        exercises: exercises.map((e) => ({ name: e.name, sets: e.sets.length })),
+        last_used_at: new Date().toISOString(),
+        use_count: 1,
+      });
+    } catch {}
+    setSaveModalVisible(false);
+    router.replace(`/workout/summary?sessionId=${completedSessionId}`);
+  };
+
+  const handleSkipSave = () => {
+    setSaveModalVisible(false);
+    if (completedSessionId)
+      router.replace(`/workout/summary?sessionId=${completedSessionId}`);
+  };
+
+  if (loading || !plan) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.accent.primary} />
+          <Text style={styles.loadingText}>Loading workout...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
+        </Pressable>
+        <Text style={styles.headerTitle}>Log Workout</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.workoutName}>{plan.name}</Text>
+
+        <View style={styles.durationRow}>
+          <Ionicons name="time-outline" size={18} color={colors.text.secondary} />
+          <Text style={styles.durationLabel}>Duration</Text>
+          <TextInput
+            style={styles.durationInput}
+            value={duration}
+            onChangeText={setDuration}
+            keyboardType="numeric"
+          />
+          <Text style={styles.durationUnit}>min</Text>
+        </View>
+
+        {exercises.map((ex, exIdx) => (
+          <View key={`${ex.exercise_id}-${exIdx}`} style={styles.exerciseCard}>
+            <View style={styles.exerciseHeader}>
+              <Text style={styles.exerciseName}>{ex.name}</Text>
+              <Pressable onPress={() => removeExercise(exIdx)}>
+                <Ionicons name="close" size={18} color={colors.text.tertiary} />
+              </Pressable>
+            </View>
+            <View style={styles.setPillRow}>
+              {ex.sets.map((set, setIdx) => (
+                <Pressable
+                  key={setIdx}
+                  style={styles.setPill}
+                  onPress={() => {
+                    setEditWeight(set.weight);
+                    setEditReps(set.reps);
+                    setEditingSet({ exIdx, setIdx });
+                  }}
+                  onLongPress={() => removeSet(exIdx, setIdx)}
+                >
+                  <Text style={styles.setPillText}>
+                    {set.weight} x {set.reps}
+                  </Text>
+                </Pressable>
+              ))}
+              <Pressable style={styles.addSetPill} onPress={() => addSet(exIdx)}>
+                <Ionicons name="add" size={16} color={colors.accent.primary} />
+              </Pressable>
+            </View>
+          </View>
+        ))}
+
+        <Pressable
+          style={styles.addExerciseBtn}
+          onPress={() => setSearchOpen(true)}
+        >
+          <Ionicons name="add" size={20} color={colors.accent.primary} />
+          <Text style={styles.addExerciseText}>Add Exercise</Text>
+        </Pressable>
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <Text style={styles.footerSummary}>
+          {exercises.length} exercises · {totalSets} sets · ~
+          {totalVolume >= 1000
+            ? `${(totalVolume / 1000).toFixed(1)}k`
+            : totalVolume}{' '}
+          lbs
+        </Text>
+        <Pressable
+          style={[styles.completeButton, saving && { opacity: 0.6 }]}
+          onPress={handleComplete}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator color={colors.text.inverse} />
+          ) : (
+            <Text style={styles.completeButtonText}>Complete Workout</Text>
+          )}
+        </Pressable>
+      </View>
+
+      {/* Edit set modal */}
+      <Modal
+        visible={!!editingSet}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingSet(null)}
+      >
+        <Pressable
+          style={styles.editOverlay}
+          onPress={() => setEditingSet(null)}
+        >
+          <View style={styles.editSheet}>
+            <Text style={styles.editTitle}>Edit Set</Text>
+            <View style={styles.editRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.editLabel}>Weight</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editWeight}
+                  onChangeText={setEditWeight}
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.editLabel}>Reps</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editReps}
+                  onChangeText={setEditReps}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+            <Pressable
+              style={styles.editOkBtn}
+              onPress={() => {
+                if (editingSet)
+                  updateSet(
+                    editingSet.exIdx,
+                    editingSet.setIdx,
+                    editWeight,
+                    editReps
+                  );
+              }}
+            >
+              <Text style={styles.editOkText}>OK</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Add exercise search */}
+      <Modal
+        visible={searchOpen}
+        animationType="slide"
+        onRequestClose={() => setSearchOpen(false)}
+      >
+        <SafeAreaView style={styles.searchContainer}>
+          <View style={styles.searchHeader}>
+            <Pressable onPress={() => setSearchOpen(false)}>
+              <Ionicons name="close" size={24} color={colors.text.primary} />
+            </Pressable>
+            <Text style={styles.searchTitle}>Add Exercise</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search..."
+            placeholderTextColor={colors.text.tertiary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          <ScrollView style={{ flex: 1 }}>
+            {allExercises
+              .filter(
+                (e) =>
+                  !searchQuery.trim() ||
+                  e.name.toLowerCase().includes(searchQuery.toLowerCase())
+              )
+              .slice(0, 50)
+              .map((ex) => (
+                <Pressable
+                  key={ex.id}
+                  style={styles.searchItem}
+                  onPress={() => addExercise(ex)}
+                >
+                  <Text style={styles.searchItemName}>{ex.name}</Text>
+                  <Text style={styles.searchItemMeta}>{ex.primary_muscle}</Text>
+                </Pressable>
+              ))}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Save workout modal */}
+      <Modal
+        visible={saveModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleSkipSave}
+      >
+        <Pressable style={styles.saveOverlay} onPress={handleSkipSave}>
+          <View style={styles.saveSheet}>
+            <View style={styles.saveIconCircle}>
+              <Ionicons name="bookmark" size={28} color={colors.accent.primary} />
+            </View>
+            <Text style={styles.saveTitle}>Save This Workout?</Text>
+            <Text style={styles.saveSubtitle}>Reuse it next time</Text>
+            {exercises.slice(0, 5).map((e, i) => (
+              <View key={i} style={styles.saveExRow}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.accent.primary} />
+                <Text style={styles.saveExName}>{e.name}</Text>
+                <Text style={styles.saveExSets}>{e.sets.length} sets</Text>
+              </View>
+            ))}
+            <TextInput
+              style={styles.saveNameInput}
+              placeholder="Name this workout (e.g., My Push Day)"
+              placeholderTextColor={colors.text.tertiary}
+              value={saveWorkoutName}
+              onChangeText={setSaveWorkoutName}
+            />
+            <Pressable style={styles.saveButton} onPress={handleSaveWorkout}>
+              <Text style={styles.saveButtonText}>Save Workout</Text>
+            </Pressable>
+            <Pressable style={styles.skipButton} onPress={handleSkipSave}>
+              <Text style={styles.skipText}>Skip</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg.primary },
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  loadingText: { fontSize: font.md, color: colors.text.secondary },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+  },
+  headerTitle: {
+    fontSize: font.xl,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  scroll: { flex: 1, paddingHorizontal: spacing.xl },
+  workoutName: {
+    fontSize: font.xxl,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+  },
+  durationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.card,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    marginBottom: spacing.lg,
+  },
+  durationLabel: { flex: 1, fontSize: font.md, color: colors.text.secondary },
+  durationInput: {
+    fontSize: font.lg,
+    fontWeight: '700',
+    color: colors.text.primary,
+    minWidth: 48,
+    textAlign: 'right',
+  },
+  durationUnit: { fontSize: font.md, color: colors.text.tertiary },
+  exerciseCard: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  exerciseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  exerciseName: { fontSize: font.lg, fontWeight: '700', color: colors.text.primary },
+  setPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    alignItems: 'center',
+  },
+  setPill: {
+    backgroundColor: colors.bg.input,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  setPillText: { fontSize: font.sm, fontWeight: '600', color: colors.text.primary },
+  addSetPill: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    backgroundColor: colors.accent.bg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addExerciseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    backgroundColor: colors.accent.bg,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
+  },
+  addExerciseText: {
+    color: colors.accent.primary,
+    fontSize: font.md,
+    fontWeight: '600',
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.bg.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: 36,
+  },
+  footerSummary: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  completeButton: {
+    backgroundColor: colors.accent.primary,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  completeButtonText: {
+    color: colors.text.inverse,
+    fontSize: font.lg,
+    fontWeight: '700',
+  },
+  editOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  editSheet: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    width: '85%',
+  },
+  editTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text.primary, marginBottom: spacing.md },
+  editRow: { flexDirection: 'row', gap: spacing.md },
+  editLabel: { fontSize: font.sm, color: colors.text.secondary, marginBottom: spacing.xs },
+  editInput: {
+    backgroundColor: colors.bg.input,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    fontSize: font.lg,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  editOkBtn: {
+    backgroundColor: colors.accent.primary,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  editOkText: { color: colors.text.inverse, fontWeight: '700', fontSize: font.md },
+  searchContainer: { flex: 1, backgroundColor: colors.bg.primary },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.xl,
+  },
+  searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
+  searchInput: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.md,
+    fontSize: font.md,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  searchItem: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.default,
+  },
+  searchItemName: { fontSize: font.md, fontWeight: '600', color: colors.text.primary },
+  searchItemMeta: { fontSize: font.sm, color: colors.text.secondary, marginTop: 2 },
+  saveOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  saveSheet: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    width: '90%',
+    maxWidth: 400,
+  },
+  saveIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.accent.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: spacing.md,
+  },
+  saveTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary, textAlign: 'center' },
+  saveSubtitle: { fontSize: font.sm, color: colors.text.secondary, textAlign: 'center', marginTop: 4 },
+  saveExRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  saveExName: { flex: 1, fontSize: font.md, color: colors.text.primary },
+  saveExSets: { fontSize: font.sm, color: colors.text.secondary },
+  saveNameInput: {
+    backgroundColor: colors.bg.input,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
+    fontSize: font.md,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  saveButton: {
+    backgroundColor: colors.accent.primary,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  saveButtonText: { color: colors.text.inverse, fontWeight: '700', fontSize: font.lg },
+  skipButton: { alignItems: 'center', marginTop: spacing.md },
+  skipText: { color: colors.text.tertiary, fontSize: font.md, fontWeight: '600' },
+});

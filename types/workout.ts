@@ -52,7 +52,7 @@ export interface MuscleFatigue {
   muscle_group: string;
   last_trained_at: string | null;
   volume_load: number;
-  recovery_pct: number;
+  recovery_pct: number | null;
   updated_at: string;
 }
 

@@ -10,15 +10,16 @@ import {
   PanResponder,
 } from 'react-native';
 import { colors, font, spacing, radius, recoveryColor } from '@/utils/theme';
-import { formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const SHEET_HEIGHT = 260;
+const SHEET_HEIGHT = 300;
 
-interface MuscleFatigueData {
+export interface MuscleFatigueData {
   muscle_group: string;
   recovery_pct: number | null;
   last_trained_at: string | null;
+  volume_load?: number;
 }
 
 interface MuscleDetailSheetProps {
@@ -46,10 +47,10 @@ const MUSCLE_LABELS: Record<string, string> = {
 };
 
 function getStatus(pct: number | null): string {
-  if (pct === null) return 'No data yet';
+  if (pct === null || pct === undefined) return 'No data yet';
   if (pct >= 80) return 'Ready for heavy work';
-  if (pct >= 50) return 'Light isolation only';
-  return 'Rest this muscle';
+  if (pct >= 50) return 'Moderate — reduce volume';
+  return 'Fatigued — avoid or go light';
 }
 
 export default function MuscleDetailSheet({
@@ -104,9 +105,11 @@ export default function MuscleDetailSheet({
   const color = recoveryColor(recovery);
   const status = getStatus(recovery);
   const label = muscle ? MUSCLE_LABELS[muscle] ?? muscle : '';
-  const lastTrained = entry?.last_trained_at
-    ? formatDistanceToNow(new Date(entry.last_trained_at), { addSuffix: true })
-    : 'Never';
+  const lastTrainedAt = entry?.last_trained_at;
+  const lastTrainedLabel = lastTrainedAt
+    ? format(new Date(lastTrainedAt), 'MMM d, yyyy')
+    : null;
+  const volumeLoad = entry?.volume_load ?? 0;
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
@@ -140,9 +143,20 @@ export default function MuscleDetailSheet({
             </View>
 
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Last Trained</Text>
-              <Text style={styles.infoValue}>{lastTrained}</Text>
+              <Text style={styles.infoLabel}>Last trained</Text>
+              <Text style={styles.infoValue}>
+                {lastTrainedLabel ?? 'Never trained'}
+              </Text>
             </View>
+
+            {volumeLoad > 0 && lastTrainedAt ? (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Volume last session</Text>
+                <Text style={styles.infoValue}>
+                  {Math.round(volumeLoad).toLocaleString()} lb·reps
+                </Text>
+              </View>
+            ) : null}
           </Pressable>
         </Animated.View>
       </Pressable>
@@ -190,6 +204,7 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: font.md,
     fontWeight: '600',
+    flex: 1,
   },
   recoveryBar: {
     height: 6,
@@ -205,8 +220,8 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: spacing.lg,
-    paddingTop: spacing.lg,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border.default,
   },

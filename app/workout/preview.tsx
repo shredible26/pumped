@@ -7,8 +7,7 @@ import {
   Pressable,
   ActivityIndicator,
   Modal,
-  Animated,
-  Dimensions,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -16,9 +15,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useWorkoutStore, ActiveExercise } from '@/stores/workoutStore';
-import { supabase } from '@/services/supabase';
+import { getTodaysPlan } from '@/services/ai';
 import { createSession } from '@/services/workouts';
-import { AIWorkoutPlan, AIExercisePlan } from '@/types/workout';
+import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
+import { getGenerationCreditsRemaining } from '@/services/credits';
 
 export default function WorkoutPreviewScreen() {
   const router = useRouter();
@@ -26,74 +26,49 @@ export default function WorkoutPreviewScreen() {
   const profile = useAuthStore((s) => s.profile);
   const startSession = useWorkoutStore((s) => s.startSession);
 
-  const [plan, setPlan] = useState<AIWorkoutPlan | null>(null);
+  const [plan, setPlan] = useState<GeneratedWorkout | null>(null);
   const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
-  const [whyExercise, setWhyExercise] = useState<AIExercisePlan | null>(null);
+  const [whyExercise, setWhyExercise] = useState<GeneratedExercise | null>(null);
+
+  const fetchPlan = useCallback(async () => {
+    if (!session?.user?.id) return;
+    const p = await getTodaysPlan(session.user.id);
+    setPlan(p);
+    setLoading(false);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     fetchPlan();
-  }, []);
-
-  const fetchPlan = async () => {
-    if (!session?.user?.id) return;
-    const today = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
-      .from('ai_workout_plans')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .eq('plan_date', today)
-      .eq('used', false)
-      .order('generated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    setPlan(data as AIWorkoutPlan | null);
-    setLoading(false);
-  };
+  }, [fetchPlan]);
 
   const programColor = profile?.program_style
     ? colors.program[profile.program_style] ?? colors.accent.primary
     : colors.accent.primary;
 
-  const handleStart = async () => {
-    if (!session?.user?.id || !plan) return;
-    setStarting(true);
-    try {
-      const exercises = (plan.exercises ?? []) as AIExercisePlan[];
-      const ws = await createSession({
-        user_id: session.user.id,
-        date: new Date().toISOString().split('T')[0],
-        name: plan.workout_name,
-        workout_type: plan.workout_type,
-        source: 'ai_generated',
-        exercise_count: exercises.length,
-        set_count: exercises.reduce((sum, e) => sum + e.sets, 0),
-        total_volume: 0,
-        pr_count: 0,
-        completed: false,
-        started_at: new Date().toISOString(),
-      });
+  const handleLogWorkout = () => {
+    router.push('/workout/log');
+  };
 
-      const activeExercises: ActiveExercise[] = exercises.map((e) => ({
-        exercise_id: e.exercise_id,
-        name: e.name,
-        primary_muscle: '',
-        equipment: '',
-        is_compound: e.rest_seconds >= 120,
-        sets: e.sets,
-        target_reps: e.target_reps,
-        target_weight: e.target_weight,
-        rest_seconds: e.rest_seconds,
-        why: e.why,
-      }));
-
-      startSession(ws.id, plan.workout_name, 'ai_generated', activeExercises);
-      router.replace('/workout/active');
-    } catch (err) {
-      console.warn('Failed to start workout:', err);
-    } finally {
-      setStarting(false);
+  const handleRegenerate = async () => {
+    const remaining = await getGenerationCreditsRemaining(profile ?? null);
+    if (remaining <= 0) {
+      Alert.alert(
+        'No generations left',
+        "You've used both daily generations. Try again tomorrow, or use Speed Log.",
+      );
+      return;
     }
+    Alert.alert(
+      'Regenerate Workout',
+      `You have ${remaining} credit${remaining === 1 ? '' : 's'} remaining today. Regenerate?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: () => router.push('/workout/modifications'),
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -122,22 +97,27 @@ export default function WorkoutPreviewScreen() {
           <Text style={styles.emptyIcon}>🤖</Text>
           <Text style={styles.emptyTitle}>No workout planned</Text>
           <Text style={styles.emptySubtext}>
-            No AI workout available for today. Try logging a custom workout instead.
+            No AI workout available for today. Generate one from the home screen or log a custom workout.
           </Text>
           <Pressable
             style={styles.customButton}
+            onPress={() => router.replace('/(tabs)')}
+          >
+            <Text style={styles.customButtonText}>Back to Today</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.customButton, { marginTop: spacing.sm, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border.light }]}
             onPress={() => router.replace('/workout/custom')}
           >
-            <Text style={styles.customButtonText}>Log Custom Workout</Text>
+            <Text style={[styles.customButtonText, { color: colors.text.primary }]}>Log Custom Workout</Text>
           </Pressable>
         </View>
       </SafeAreaView>
     );
   }
 
-  const exercises = (plan.exercises ?? []) as AIExercisePlan[];
-  const totalSets = exercises.reduce((sum, e) => sum + e.sets, 0);
-  const estMinutes = Math.round(exercises.length * 8);
+  const exercises = plan.exercises ?? [];
+  const estMinutes = plan.estimated_minutes ?? Math.round(exercises.length * 8);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -150,7 +130,25 @@ export default function WorkoutPreviewScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
-        <Text style={styles.workoutName}>{plan.workout_name}</Text>
+        <Text style={styles.workoutName}>{plan.name}</Text>
+
+        {plan.description ? (
+          <Text style={styles.workoutDescription} numberOfLines={3}>
+            {plan.description}
+          </Text>
+        ) : null}
+
+        {(plan.primary_targets && plan.primary_targets.length > 0) ? (
+          <View style={styles.targetsRow}>
+            {plan.primary_targets.map((t) => (
+              <View key={t} style={[styles.targetPill, { borderColor: programColor + '66' }]}>
+                <Text style={[styles.targetPillText, { color: programColor }]}>
+                  {String(t).replace('_', ' ')}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.tagsRow}>
           <View style={styles.tag}>
@@ -179,8 +177,13 @@ export default function WorkoutPreviewScreen() {
               <View style={styles.exerciseInfo}>
                 <Text style={styles.exerciseName}>{ex.name}</Text>
                 <Text style={styles.exerciseStats}>
-                  {ex.sets} sets · {ex.target_reps} reps · {ex.target_weight} lbs
+                  {ex.sets} sets · {ex.target_reps} reps · {ex.target_weight_lbs ?? 0} lbs
                 </Text>
+                {ex.primary_muscle ? (
+                  <Text style={styles.exerciseMeta}>
+                    {ex.primary_muscle.replace('_', ' ')}
+                  </Text>
+                ) : null}
               </View>
               {ex.why ? (
                 <Pressable
@@ -198,16 +201,12 @@ export default function WorkoutPreviewScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable
-          style={[styles.startButton, starting && styles.startButtonDisabled]}
-          onPress={handleStart}
-          disabled={starting}
-        >
-          {starting ? (
-            <ActivityIndicator color={colors.text.inverse} />
-          ) : (
-            <Text style={styles.startButtonText}>Start Workout</Text>
-          )}
+        <Pressable style={styles.startButton} onPress={handleLogWorkout}>
+          <Text style={styles.startButtonText}>Log This Workout</Text>
+        </Pressable>
+        <Pressable style={styles.regenerateButton} onPress={() => void handleRegenerate()}>
+          <Ionicons name="refresh" size={20} color={colors.text.primary} />
+          <Text style={styles.regenerateButtonText}>Regenerate Workout</Text>
         </Pressable>
       </View>
 
@@ -228,9 +227,16 @@ export default function WorkoutPreviewScreen() {
                 {whyExercise?.why || 'No explanation available for this exercise.'}
               </Text>
               <View style={styles.whyTagsRow}>
+                {whyExercise?.primary_muscle && (
+                  <View style={styles.whyTag}>
+                    <Text style={styles.whyTagText}>
+                      {whyExercise.primary_muscle.replace('_', ' ')}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.whyTag}>
                   <Text style={styles.whyTagText}>
-                    {whyExercise?.target_reps} reps
+                    {whyExercise?.sets} sets × {whyExercise?.target_reps} reps
                   </Text>
                 </View>
               </View>
@@ -274,6 +280,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text.primary,
     marginTop: spacing.md,
+  },
+  workoutDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+  },
+  targetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  targetPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    backgroundColor: colors.bg.input,
+  },
+  targetPillText: {
+    fontSize: font.xs,
+    fontWeight: '600',
+    textTransform: 'capitalize',
   },
   tagsRow: {
     flexDirection: 'row',
@@ -336,6 +366,12 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: 2,
   },
+  exerciseMeta: {
+    fontSize: font.xs,
+    color: colors.text.tertiary,
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
   whyButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
@@ -367,6 +403,23 @@ const styles = StyleSheet.create({
     color: colors.text.inverse,
     fontSize: font.lg,
     fontWeight: '700',
+  },
+  regenerateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  regenerateButtonText: {
+    fontSize: font.lg,
+    fontWeight: '700',
+    color: colors.text.primary,
   },
   emptyState: {
     flex: 1,

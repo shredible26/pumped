@@ -21,15 +21,18 @@ import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useFatigue } from '@/hooks/useFatigue';
 import { supabase } from '@/services/supabase';
+import { getTodaysPlan } from '@/services/ai';
 import { Profile } from '@/types/user';
 import BodyMap from '@/components/home/BodyMap';
 import MuscleDetailSheet from '@/components/home/MuscleDetailSheet';
+import type { GeneratedWorkout } from '@/services/ai';
 
 const PROGRAM_LABELS: Record<string, string> = {
   ppl: 'Push/Pull/Legs',
   upper_lower: 'Upper/Lower',
   bro_split: 'Bro Split',
   full_body: 'Full Body',
+  aesthetic: 'Aesthetic',
   ai_optimal: 'AI Optimal',
 };
 
@@ -45,6 +48,7 @@ function getTodayWorkoutType(programStyle: string | undefined): string {
     case 'upper_lower': return UL_ROTATION[dayOfWeek] ?? 'Upper';
     case 'bro_split': return BRO_ROTATION[dayOfWeek] ?? 'Chest/Tris';
     case 'full_body': return FB_ROTATION[dayOfWeek] ?? 'Full Body';
+    case 'aesthetic': return 'AI Workout';
     case 'ai_optimal': return 'AI Workout';
     default: return 'Workout';
   }
@@ -61,6 +65,7 @@ export default function TodayScreen() {
   const [sheetVisible, setSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [workoutDaysThisWeek, setWorkoutDaysThisWeek] = useState<string[]>([]);
+  const [cachedPlan, setCachedPlan] = useState<GeneratedWorkout | null>(null);
 
   const fetchProfile = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -88,9 +93,20 @@ export default function TodayScreen() {
     }
   }, [session?.user?.id]);
 
+  const fetchCachedPlan = useCallback(async () => {
+    if (!session?.user?.id) return;
+    const plan = await getTodaysPlan(session.user.id);
+    setCachedPlan(plan);
+  }, [session?.user?.id]);
+
   const loadData = useCallback(async () => {
-    await Promise.all([fetchProfile(), refreshFatigue(), fetchWeekWorkouts()]);
-  }, [fetchProfile, refreshFatigue, fetchWeekWorkouts]);
+    await Promise.all([
+      fetchProfile(),
+      refreshFatigue(),
+      fetchWeekWorkouts(),
+      fetchCachedPlan(),
+    ]);
+  }, [fetchProfile, refreshFatigue, fetchWeekWorkouts, fetchCachedPlan]);
 
   useEffect(() => {
     loadData();
@@ -185,6 +201,11 @@ export default function TodayScreen() {
               <View style={styles.scheduledBadge}>
                 <Text style={styles.scheduledBadgeText}>SCHEDULED</Text>
               </View>
+              {cachedPlan ? (
+                <View style={styles.generatedBadge}>
+                  <Text style={styles.generatedBadgeText}>Generated</Text>
+                </View>
+              ) : null}
               <View style={styles.workoutIconBox}>
                 <Ionicons name="barbell" size={18} color={colors.accent.primary} />
               </View>
@@ -192,7 +213,9 @@ export default function TodayScreen() {
 
             <Text style={styles.workoutType}>{todayType}</Text>
             <View style={styles.programRow}>
-              <Text style={styles.programName}>{programLabel}</Text>
+              <Text style={styles.programName}>
+                {programLabel ? `${programLabel} · AI Enhanced` : 'AI Enhanced'}
+              </Text>
               <Ionicons
                 name="chevron-down"
                 size={14}
@@ -202,10 +225,22 @@ export default function TodayScreen() {
 
             <Pressable
               style={styles.startButton}
-              onPress={() => router.push('/workout/preview')}
+              onPress={() => {
+                if (cachedPlan) {
+                  router.push('/workout/preview');
+                } else {
+                  router.push('/workout/modifications');
+                }
+              }}
             >
-              <Ionicons name="play" size={18} color={colors.text.inverse} />
-              <Text style={styles.startButtonText}>Start Workout</Text>
+              <Ionicons
+                name={cachedPlan ? 'play' : 'sparkles'}
+                size={18}
+                color={colors.text.inverse}
+              />
+              <Text style={styles.startButtonText}>
+                {cachedPlan ? 'View Workout' : 'Generate Workout'}
+              </Text>
             </Pressable>
 
             <Pressable
@@ -227,16 +262,21 @@ export default function TodayScreen() {
             <Text style={styles.restEmoji}>🧘</Text>
             <Text style={styles.restTitle}>Rest Day</Text>
             <Text style={styles.restSubtext}>
-              Your muscles are recovering. Come back stronger tomorrow.
+              Want to train anyway? Generate a light recovery workout.
             </Text>
+            <Pressable
+              style={styles.startButton}
+              onPress={() => router.push('/workout/modifications')}
+            >
+              <Ionicons name="sparkles" size={18} color={colors.text.inverse} />
+              <Text style={styles.startButtonText}>Generate Workout</Text>
+            </Pressable>
             <Pressable
               style={styles.speedLogButton}
               onPress={() => router.push('/speedlog')}
             >
               <Ionicons name="flash" size={18} color={colors.text.primary} />
-              <Text style={styles.speedLogButtonText}>
-                Log a workout anyway
-              </Text>
+              <Text style={styles.speedLogButtonText}>Speed Log</Text>
             </Pressable>
           </View>
         )}
@@ -365,6 +405,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
   scheduledBadge: {
     backgroundColor: colors.accent.bg,
@@ -377,6 +419,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.accent.primary,
     letterSpacing: 1,
+  },
+  generatedBadge: {
+    backgroundColor: colors.accent.bg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  generatedBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.accent.primary,
+    letterSpacing: 0.5,
   },
   workoutIconBox: {
     width: 36,

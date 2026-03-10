@@ -11,6 +11,9 @@ npm-debug.*
 web-build/
 .env
 .env.local
+
+# Supabase CLI temp
+supabase/.temp/
 .env.production
 ios/
 android/
