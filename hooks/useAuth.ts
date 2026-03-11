@@ -9,6 +9,8 @@ import { Profile } from '@/types/user';
 
 WebBrowser.maybeCompleteAuthSession();
 
+const AUTH_INIT_TIMEOUT_MS = 12000;
+
 async function fetchProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
@@ -22,6 +24,13 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
   return data as Profile | null;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 export function useAuth() {
   const { session, profile, loading, setSession, setProfile, setInitialized, setLoading, reset } =
     useAuthStore();
@@ -31,16 +40,27 @@ export function useAuth() {
 
     const init = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const sessionPromise = supabase.auth
+          .getSession()
+          .then(({ data: { session } }) => session)
+          .catch(() => null);
+        const session = await withTimeout(sessionPromise, AUTH_INIT_TIMEOUT_MS, null);
         if (cancelled) return;
         setSession(session);
         if (session?.user) {
-          const p = await fetchProfile(session.user.id);
+          const p = await withTimeout(
+            fetchProfile(session.user.id).catch(() => null),
+            AUTH_INIT_TIMEOUT_MS,
+            null
+          );
           if (cancelled) return;
           setProfile(p);
         }
       } catch (e) {
-        if (!cancelled) setSession(null);
+        if (!cancelled) {
+          setSession(null);
+          setProfile(null);
+        }
       } finally {
         if (!cancelled) setInitialized(true);
       }
@@ -50,7 +70,7 @@ export function useAuth() {
 
     const timeout = setTimeout(() => {
       if (!cancelled) setInitialized(true);
-    }, 4000);
+    }, Math.min(4000, AUTH_INIT_TIMEOUT_MS));
 
     const {
       data: { subscription },

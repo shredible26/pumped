@@ -9,8 +9,9 @@ import {
   Dimensions,
   PanResponder,
 } from 'react-native';
-import { colors, font, spacing, radius, recoveryColor } from '@/utils/theme';
-import { format } from 'date-fns';
+import { colors, font, spacing, radius } from '@/utils/theme';
+import { getReadinessColor, getReadinessStatus } from '@/utils/recoveryModel';
+import { format, formatDistanceToNow } from 'date-fns';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const SHEET_HEIGHT = 300;
@@ -20,6 +21,7 @@ export interface MuscleFatigueData {
   recovery_pct: number | null;
   last_trained_at: string | null;
   volume_load?: number;
+  last_strain_score?: number | null;
 }
 
 interface MuscleDetailSheetProps {
@@ -45,13 +47,6 @@ const MUSCLE_LABELS: Record<string, string> = {
   glutes: 'Glutes',
   calves: 'Calves',
 };
-
-function getStatus(pct: number | null): string {
-  if (pct === null || pct === undefined) return 'No data yet';
-  if (pct >= 80) return 'Ready for heavy work';
-  if (pct >= 50) return 'Moderate — reduce volume';
-  return 'Fatigued — avoid or go light';
-}
 
 export default function MuscleDetailSheet({
   visible,
@@ -101,15 +96,19 @@ export default function MuscleDetailSheet({
   ).current;
 
   const entry = fatigueMap.find((m) => m.muscle_group === muscle);
-  const recovery = entry?.recovery_pct ?? null;
-  const color = recoveryColor(recovery);
-  const status = getStatus(recovery);
+  const recovery = entry?.recovery_pct != null && entry.recovery_pct !== -1 ? entry.recovery_pct : null;
+  const color = getReadinessColor(recovery);
+  const status = getReadinessStatus(recovery);
   const label = muscle ? MUSCLE_LABELS[muscle] ?? muscle : '';
   const lastTrainedAt = entry?.last_trained_at;
   const lastTrainedLabel = lastTrainedAt
     ? format(new Date(lastTrainedAt), 'MMM d, yyyy')
     : null;
+  const timeSinceTrained = lastTrainedAt
+    ? formatDistanceToNow(new Date(lastTrainedAt), { addSuffix: true })
+    : null;
   const volumeLoad = entry?.volume_load ?? 0;
+  const lastStrainScore = entry?.last_strain_score ?? null;
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
@@ -135,7 +134,7 @@ export default function MuscleDetailSheet({
                 style={[
                   styles.recoveryFill,
                   {
-                    width: recovery !== null ? `${recovery}%` : '0%',
+                    width: recovery !== null ? `${Math.min(100, recovery)}%` : '0%',
                     backgroundColor: color,
                   },
                 ]}
@@ -148,6 +147,20 @@ export default function MuscleDetailSheet({
                 {lastTrainedLabel ?? 'Never trained'}
               </Text>
             </View>
+
+            {timeSinceTrained ? (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Time since last trained</Text>
+                <Text style={styles.infoValue}>{timeSinceTrained}</Text>
+              </View>
+            ) : null}
+
+            {lastStrainScore != null && lastStrainScore > 0 ? (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Strain from last workout</Text>
+                <Text style={styles.infoValue}>{lastStrainScore}%</Text>
+              </View>
+            ) : null}
 
             {volumeLoad > 0 && lastTrainedAt ? (
               <View style={styles.infoRow}>

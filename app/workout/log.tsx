@@ -23,7 +23,7 @@ import {
   insertSetLogs,
   completeSession,
 } from '@/services/workouts';
-import { applyWorkoutFatigue } from '@/services/fatigue';
+import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
 import { updateProfileStreak } from '@/services/streak';
 import { supabase } from '@/services/supabase';
 import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
@@ -239,6 +239,7 @@ export default function WorkoutLogScreen() {
       });
 
       await applyWorkoutFatigue(session.user.id, contributions).catch(() => {});
+      await recordWorkoutStrain(session.user.id, ws.id, new Date()).catch(() => {});
 
       const prevTotal = profile?.total_workouts ?? 0;
       await supabase

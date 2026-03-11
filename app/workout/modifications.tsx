@@ -111,11 +111,15 @@ export default function ModificationsScreen() {
 
       setGenerating(true);
       try {
+        const { getBodyMapReadiness } = await import('@/services/fatigue');
+        const latestReadiness = await getBodyMapReadiness(session!.user!.id, new Date());
+        await refreshFatigue();
         const fatigueRecord: Record<string, any> = {};
-        fatigueMap.forEach((e) => {
+        latestReadiness.forEach((e) => {
           fatigueRecord[e.muscle_group] = {
             recovery_pct: e.recovery_pct,
             last_trained_at: e.last_trained_at,
+            last_strain_score: e.last_strain_score ?? undefined,
           };
         });
 

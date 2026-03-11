@@ -14,7 +14,7 @@ import { colors, font, spacing, radius } from '@/utils/theme';
 import { useWorkoutStore } from '@/stores/workoutStore';
 import { useAuthStore } from '@/stores/authStore';
 import { completeSession, insertSetLogs } from '@/services/workouts';
-import { applyWorkoutFatigue } from '@/services/fatigue';
+import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
 import { updateProfileStreak } from '@/services/streak';
 import { fetchExercises } from '@/services/exercises';
 import { supabase } from '@/services/supabase';
@@ -224,6 +224,7 @@ export default function WorkoutSummaryScreen() {
           });
         }
         await applyWorkoutFatigue(userId, contributions);
+        await recordWorkoutStrain(userId, sessionId, new Date());
       } catch (e) {
         console.warn('Failed to update fatigue:', e);
       }

@@ -89,7 +89,9 @@ Deno.serve(async (req) => {
 
     const systemPrompt = `You are the workout AI for Pumped. Before generating ANY exercises, you MUST analyze the user's muscle fatigue data and explicitly reason about which muscles are available.
 
-FATIGUE RULES (recovery % from fatigueMap: null/gray = no data yet — treat as fully available):
+The fatigueMap is the same data shown on the user's Muscle Readiness diagram (strain-based recovery model). Use it as the single source of truth for recovery.
+
+FATIGUE RULES (recovery_pct from fatigueMap: null/gray = no data yet — treat as fully available):
 1. Recovery below 30% (RED): Do NOT target as PRIMARY muscle. If the user's modifications explicitly demand that muscle, include it with reduced volume (2-3 sets max), lighter weight, higher reps (12-15), and in the exercise "why" add: "Your [muscle] is only [X]% recovered. We've reduced volume and recommend lighter weight. Stop if you feel pain."
 2. Recovery 30-60% (YELLOW): Can target but moderate volume only — 3 sets max, moderate weight; prefer accessories over heavy compounds for that muscle.
 3. Recovery above 60% (GREEN): Fully available for normal programming.
@@ -148,7 +150,7 @@ USER PROFILE:
 
 TODAY TYPE: ${todayType === "rest" ? "Rest day but user may train — light recovery only." : todayType === "ai_decides" ? "You decide from fatigue." : todayType}
 
-MUSCLE FATIGUE (analyze before choosing exercises — red <30% avoid primary; yellow 30-60 moderate; green >60 full; null = no data = available):
+MUSCLE READINESS (same as Muscle Readiness diagram — analyze before choosing exercises; red <30% avoid primary; yellow 30-60 moderate; green >60 full; null = no data = available):
 ${Object.entries(fatigueMap || {}).map(([muscle, data]: [string, any]) => {
       const pct = data.recovery_pct;
       const band =
@@ -156,8 +158,9 @@ ${Object.entries(fatigueMap || {}).map(([muscle, data]: [string, any]) => {
         : pct < 30 ? "RED — avoid primary"
         : pct < 60 ? "YELLOW — moderate volume only"
         : "GREEN — full programming";
-      return `- ${muscle}: ${pct ?? "null"}% — ${band} (last: ${data.last_trained_at || "never"})`;
-    }).join("\n") || "- (no fatigue entries)"}
+      const strainNote = data.last_strain_score != null ? ` [last strain: ${data.last_strain_score}%]` : "";
+      return `- ${muscle}: ${pct ?? "null"}% — ${band} (last: ${data.last_trained_at || "never"}${strainNote})`;
+    }).join("\n") || "- (no readiness data)"}
 
 RECENT HISTORY:
 ${(recentHistory || []).map((w: any) => `- ${w.date}: ${w.name} (${w.total_volume} vol)`).join("\n") || "None"}

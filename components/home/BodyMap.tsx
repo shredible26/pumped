@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, Pressable, Text } from 'react-native';
 import Svg, { Path, Ellipse, Rect, G } from 'react-native-svg';
 import { colors, font, spacing, radius } from '@/utils/theme';
-import { recoveryColor } from '@/utils/theme';
+import { getReadinessColor } from '@/utils/recoveryModel';
 
 interface MuscleData {
   muscle_group: string;
@@ -95,7 +95,8 @@ const BODY_OUTLINE_BACK = `
 function getRecovery(fatigueMap: MuscleData[], muscle: string): number | null {
   const entry = fatigueMap.find((m) => m.muscle_group === muscle);
   if (!entry) return null;
-  return entry.recovery_pct;
+  const pct = entry.recovery_pct;
+  return pct === -1 ? null : pct;
 }
 
 function MuscleEllipse({
@@ -107,8 +108,8 @@ function MuscleEllipse({
   recovery: number | null;
   onPress: () => void;
 }) {
-  const color = recoveryColor(recovery);
-  const isNoData = recovery === null;
+  const color = getReadinessColor(recovery);
+  const isNoData = recovery === null || recovery === undefined;
   return (
     <Ellipse
       cx={region.cx}

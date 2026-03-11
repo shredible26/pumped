@@ -22,7 +22,7 @@ import { fetchExercises } from '@/services/exercises';
 import { createSession, insertSetLogs, completeSession } from '@/services/workouts';
 import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
 import { getLocalDateString } from '@/utils/date';
-import { applyWorkoutFatigue } from '@/services/fatigue';
+import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
 import { updateProfileStreak } from '@/services/streak';
 import { supabase } from '@/services/supabase';
 import { Exercise } from '@/types/exercise';
@@ -255,6 +255,7 @@ export default function SpeedLogEditorScreen() {
       }
 
       await applyWorkoutFatigue(userId, contributions).catch(() => {});
+      await recordWorkoutStrain(userId, ws.id, new Date()).catch(() => {});
 
       const prevTotal = profile?.total_workouts ?? 0;
       await supabase
