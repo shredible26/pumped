@@ -148,6 +148,7 @@ export default function WorkoutSummaryScreen() {
           target_reps: parseInt(ex.target_reps.split('-')[0], 10) || null,
           actual_weight: cs.weight,
           actual_reps: cs.reps,
+          actual_seconds: cs.seconds ?? undefined,
           is_warmup: false,
           is_pr: false,
           completed: true,

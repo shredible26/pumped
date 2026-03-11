@@ -17,6 +17,8 @@ export interface GeneratedExercise {
   sets: number;
   target_reps: string;
   target_weight_lbs: number;
+  /** Optional; for time-based bodyweight (plank, dead hang, etc.) */
+  target_seconds?: number;
   rest_seconds: number;
   order: number;
   primary_muscle: string;

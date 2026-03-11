@@ -28,10 +28,12 @@ import { supabase } from '@/services/supabase';
 import { Exercise } from '@/types/exercise';
 import { e1rm } from '@/utils/epley';
 import { clearActiveWorkout } from '@/utils/storage';
+import { showWeightInput, showSecondsInput, isBodyweight } from '@/utils/exerciseUtils';
 
 interface SpeedSet {
   weight: string;
   reps: string;
+  seconds?: string;
 }
 
 interface SpeedExercise {
@@ -60,6 +62,7 @@ export default function SpeedLogEditorScreen() {
   } | null>(null);
   const [editWeight, setEditWeight] = useState('');
   const [editReps, setEditReps] = useState('');
+  const [editSeconds, setEditSeconds] = useState('');
   const [showFirstTimeWarning, setShowFirstTimeWarning] = useState(true);
 
   useEffect(() => {
@@ -101,16 +104,16 @@ export default function SpeedLogEditorScreen() {
 
   const addExercise = (exercise: Exercise) => {
     if (exercises.some((e) => e.exercise.id === exercise.id)) return;
+    const bw = isBodyweight(exercise.equipment);
+    const timeBased = showSecondsInput(exercise.equipment, exercise.name);
+    const defaultSets = timeBased
+      ? [{ weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }]
+      : bw
+        ? [{ weight: '0', reps: '8' }, { weight: '0', reps: '8' }, { weight: '0', reps: '8' }]
+        : [{ weight: '135', reps: '8' }, { weight: '135', reps: '8' }, { weight: '135', reps: '8' }];
     setExercises((prev) => [
       ...prev,
-      {
-        exercise,
-        sets: [
-          { weight: '135', reps: '8' },
-          { weight: '135', reps: '8' },
-          { weight: '135', reps: '8' },
-        ],
-      },
+      { exercise, sets: defaultSets },
     ]);
     setSearchOpen(false);
     setSearchQuery('');
@@ -125,13 +128,12 @@ export default function SpeedLogEditorScreen() {
       prev.map((e, i) => {
         if (i !== exIdx) return e;
         const lastSet = e.sets[e.sets.length - 1];
-        return {
-          ...e,
-          sets: [
-            ...e.sets,
-            { weight: lastSet?.weight ?? '135', reps: lastSet?.reps ?? '8' },
-          ],
+        const next = {
+          weight: lastSet?.weight ?? '0',
+          reps: lastSet?.reps ?? '8',
+          ...(lastSet?.seconds != null ? { seconds: lastSet.seconds } : {}),
         };
+        return { ...e, sets: [...e.sets, next] };
       }),
     );
   };
@@ -149,11 +151,14 @@ export default function SpeedLogEditorScreen() {
     const s = exercises[exIdx].sets[setIdx];
     setEditWeight(s.weight);
     setEditReps(s.reps);
+    setEditSeconds(s.seconds ?? '');
     setEditingSet({ exIdx, setIdx });
   };
 
   const confirmEditSet = () => {
     if (!editingSet) return;
+    const ex = exercises[editingSet.exIdx];
+    const isSec = showSecondsInput(ex.exercise.equipment, ex.exercise.name);
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== editingSet.exIdx) return e;
@@ -161,7 +166,7 @@ export default function SpeedLogEditorScreen() {
           ...e,
           sets: e.sets.map((s, si) =>
             si === editingSet.setIdx
-              ? { weight: editWeight, reps: editReps }
+              ? { ...s, weight: editWeight, reps: isSec ? '0' : editReps, ...(isSec ? { seconds: editSeconds } : {}) }
               : s,
           ),
         };
@@ -225,19 +230,22 @@ export default function SpeedLogEditorScreen() {
 
       exercises.forEach((ex, exIdx) => {
         let exVol = 0;
+        const useWeight = showWeightInput(ex.exercise.equipment);
+        const useSeconds = showSecondsInput(ex.exercise.equipment, ex.exercise.name);
         ex.sets.forEach((set, setIdx) => {
-          const w = parseFloat(set.weight) || 0;
+          const w = useWeight ? (parseFloat(set.weight) || 0) : 0;
           const r = parseInt(set.reps, 10) || 0;
-          const vol = w * r;
-          exVol += vol;
+          const sec = useSeconds && set.seconds ? parseInt(set.seconds, 10) : null;
+          exVol += w * r;
           setLogs.push({
             session_id: ws.id,
             exercise_id: ex.exercise.id,
             exercise_name: ex.exercise.name,
             exercise_order: exIdx,
             set_number: setIdx + 1,
-            actual_weight: w,
+            actual_weight: useWeight ? w : null,
             actual_reps: r,
+            actual_seconds: sec ?? undefined,
             completed: true,
             is_warmup: false,
             is_pr: false,
@@ -357,18 +365,25 @@ export default function SpeedLogEditorScreen() {
             </View>
 
             <View style={styles.setPillRow}>
-              {ex.sets.map((set, setIdx) => (
-                <Pressable
-                  key={setIdx}
-                  style={styles.setPill}
-                  onPress={() => startEditSet(exIdx, setIdx)}
-                  onLongPress={() => removeSet(exIdx, setIdx)}
-                >
-                  <Text style={styles.setPillText}>
-                    {set.weight} x {set.reps}
-                  </Text>
-                </Pressable>
-              ))}
+              {ex.sets.map((set, setIdx) => {
+                const showW = showWeightInput(ex.exercise.equipment);
+                const showSec = showSecondsInput(ex.exercise.equipment, ex.exercise.name);
+                const label = showSec && set.seconds
+                  ? `${set.seconds}s`
+                  : showW
+                    ? `${set.weight} × ${set.reps}`
+                    : `${set.reps} reps`;
+                return (
+                  <Pressable
+                    key={setIdx}
+                    style={styles.setPill}
+                    onPress={() => startEditSet(exIdx, setIdx)}
+                    onLongPress={() => removeSet(exIdx, setIdx)}
+                  >
+                    <Text style={styles.setPillText}>{label}</Text>
+                  </Pressable>
+                );
+              })}
               <Pressable style={styles.addSetPill} onPress={() => addSet(exIdx)}>
                 <Ionicons name="add" size={16} color={colors.accent.primary} />
               </Pressable>
@@ -421,26 +436,42 @@ export default function SpeedLogEditorScreen() {
             <Pressable>
               <Text style={styles.editTitle}>Edit Set</Text>
               <View style={styles.editRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.editLabel}>Weight</Text>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editWeight}
-                    onChangeText={setEditWeight}
-                    keyboardType="numeric"
-                    selectTextOnFocus
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.editLabel}>Reps</Text>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editReps}
-                    onChangeText={setEditReps}
-                    keyboardType="numeric"
-                    selectTextOnFocus
-                  />
-                </View>
+                {editingSet && showWeightInput(exercises[editingSet.exIdx]?.exercise?.equipment) && (
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.editLabel}>Weight (lbs)</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={editWeight}
+                      onChangeText={setEditWeight}
+                      keyboardType="numeric"
+                      selectTextOnFocus
+                    />
+                  </View>
+                )}
+                {editingSet && showSecondsInput(exercises[editingSet.exIdx]?.exercise?.equipment, exercises[editingSet.exIdx]?.exercise?.name) ? (
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.editLabel}>Seconds</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={editSeconds}
+                      onChangeText={setEditSeconds}
+                      keyboardType="numeric"
+                      placeholder="sec"
+                      selectTextOnFocus
+                    />
+                  </View>
+                ) : (
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.editLabel}>Reps</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={editReps}
+                      onChangeText={setEditReps}
+                      keyboardType="numeric"
+                      selectTextOnFocus
+                    />
+                  </View>
+                )}
               </View>
               <View style={styles.editActionsRow}>
                 <Pressable

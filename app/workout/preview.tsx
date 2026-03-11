@@ -177,7 +177,11 @@ export default function WorkoutPreviewScreen() {
               <View style={styles.exerciseInfo}>
                 <Text style={styles.exerciseName}>{ex.name}</Text>
                 <Text style={styles.exerciseStats}>
-                  {ex.sets} sets · {ex.target_reps} reps · {ex.target_weight_lbs ?? 0} lbs
+                  {ex.sets} sets
+                  {ex.target_seconds != null
+                    ? ` · ${ex.target_seconds}s`
+                    : ` · ${ex.target_reps} reps`}
+                  {(ex.target_weight_lbs ?? 0) > 0 ? ` · ${ex.target_weight_lbs} lbs` : ''}
                 </Text>
                 {ex.primary_muscle ? (
                   <Text style={styles.exerciseMeta}>

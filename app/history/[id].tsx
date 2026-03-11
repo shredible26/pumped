@@ -238,9 +238,11 @@ export default function SessionDetailScreen() {
                     <View key={set.id} style={styles.setRow}>
                       <Text style={styles.setLabel}>Set {set.set_number}</Text>
                       <Text style={styles.setValue}>
-                        {set.actual_weight != null && set.actual_reps != null
-                          ? `${formatWeight(set.actual_weight, units)} × ${set.actual_reps} reps`
-                          : '—'}
+                        {set.actual_seconds != null
+                          ? `${set.actual_seconds}s`
+                          : set.actual_weight != null && set.actual_reps != null
+                            ? `${formatWeight(set.actual_weight, units)} × ${set.actual_reps} reps`
+                            : '—'}
                       </Text>
                       {set.is_pr && (
                         <View style={styles.prBadge}>

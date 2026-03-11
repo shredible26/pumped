@@ -22,6 +22,7 @@ import { fetchExercises } from '@/services/exercises';
 import { createSession } from '@/services/workouts';
 import { getLocalDateString } from '@/utils/date';
 import { Exercise } from '@/types/exercise';
+import { showSecondsInput } from '@/utils/exerciseUtils';
 
 interface CustomExercise {
   exercise: Exercise;
@@ -134,6 +135,7 @@ export default function CustomWorkoutScreen() {
             ? REST_DURATIONS.secondary_compound
             : REST_DURATIONS.isolation;
 
+        const timeBased = showSecondsInput(e.exercise.equipment, e.exercise.name);
         return {
           exercise_id: e.exercise.id,
           name: e.exercise.name,
@@ -141,8 +143,9 @@ export default function CustomWorkoutScreen() {
           equipment: e.exercise.equipment,
           is_compound: isMainCompound || isSecondary,
           sets: e.sets,
-          target_reps: e.targetReps,
+          target_reps: timeBased ? '0' : e.targetReps,
           target_weight: 0,
+          ...(timeBased ? { target_seconds: 60 } : {}),
           rest_seconds: restSec,
         };
       });

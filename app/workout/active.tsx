@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useWorkoutStore } from '@/stores/workoutStore';
+import { showWeightInput, showSecondsInput } from '@/utils/exerciseUtils';
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
@@ -43,14 +44,17 @@ export default function ActiveWorkoutScreen() {
 
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState('');
+  const [seconds, setSeconds] = useState('');
   const [restCountdown, setRestCountdown] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (exercise) {
-      setWeight(exercise.target_weight > 0 ? String(exercise.target_weight) : '');
-      const defaultReps = exercise.target_reps.split('-')[0] || '8';
-      setReps(defaultReps);
+      const isBw = !showWeightInput(exercise.equipment);
+      const timeBased = showSecondsInput(exercise.equipment, exercise.name);
+      setWeight(isBw ? '0' : (exercise.target_weight > 0 ? String(exercise.target_weight) : ''));
+      setReps(timeBased ? '0' : (exercise.target_reps.split('-')[0] || '8'));
+      setSeconds(timeBased ? String(exercise.target_seconds ?? 60) : '');
     }
   }, [currentExIndex, exercise]);
 
@@ -75,16 +79,22 @@ export default function ActiveWorkoutScreen() {
   }, [isResting, restSeconds]);
 
   const handleCompleteSet = useCallback(() => {
+    const timeBased = exercise && showSecondsInput(exercise.equipment, exercise.name);
     const w = parseFloat(weight) || 0;
     const r = parseInt(reps, 10) || 0;
-    if (r <= 0) {
+    const sec = timeBased ? (parseInt(seconds, 10) || 0) : undefined;
+    if (!timeBased && r <= 0) {
       Alert.alert('Enter reps', 'Please enter the number of reps completed.');
+      return;
+    }
+    if (timeBased && (sec ?? 0) <= 0) {
+      Alert.alert('Enter seconds', 'Please enter the duration in seconds.');
       return;
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    logSet(w, r);
-  }, [weight, reps, logSet]);
+    logSet(w, timeBased ? 0 : r, timeBased ? sec : undefined);
+  }, [weight, reps, seconds, exercise, logSet]);
 
   const handleSkipRest = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -229,50 +239,72 @@ export default function ActiveWorkoutScreen() {
 
                 {completed ? (
                   <>
+                    {showWeightInput(exercise.equipment) && (
+                      <View style={[styles.setField, { flex: 1 }]}>
+                        <Text style={styles.completedFieldText}>
+                          {setData?.weight ?? 0} lbs
+                        </Text>
+                      </View>
+                    )}
                     <View style={[styles.setField, { flex: 1 }]}>
                       <Text style={styles.completedFieldText}>
-                        {setData?.weight ?? 0} lbs
-                      </Text>
-                    </View>
-                    <View style={[styles.setField, { flex: 1 }]}>
-                      <Text style={styles.completedFieldText}>
-                        {setData?.reps ?? 0} reps
+                        {setData?.seconds != null
+                          ? `${setData.seconds}s`
+                          : `${setData?.reps ?? 0} reps`}
                       </Text>
                     </View>
                   </>
                 ) : isCurrent ? (
                   <>
-                    <TextInput
-                      style={[styles.setInput, { flex: 1 }]}
-                      value={weight}
-                      onChangeText={setWeight}
-                      keyboardType="numeric"
-                      placeholder="lbs"
-                      placeholderTextColor={colors.text.tertiary}
-                      selectTextOnFocus
-                    />
-                    <TextInput
-                      style={[styles.setInput, { flex: 1 }]}
-                      value={reps}
-                      onChangeText={setReps}
-                      keyboardType="numeric"
-                      placeholder="reps"
-                      placeholderTextColor={colors.text.tertiary}
-                      selectTextOnFocus
-                    />
+                    {showWeightInput(exercise.equipment) && (
+                      <TextInput
+                        style={[styles.setInput, { flex: 1 }]}
+                        value={weight}
+                        onChangeText={setWeight}
+                        keyboardType="numeric"
+                        placeholder="lbs"
+                        placeholderTextColor={colors.text.tertiary}
+                        selectTextOnFocus
+                      />
+                    )}
+                    {showSecondsInput(exercise.equipment, exercise.name) ? (
+                      <TextInput
+                        style={[styles.setInput, { flex: 1 }]}
+                        value={seconds}
+                        onChangeText={setSeconds}
+                        keyboardType="numeric"
+                        placeholder="sec"
+                        placeholderTextColor={colors.text.tertiary}
+                        selectTextOnFocus
+                      />
+                    ) : (
+                      <TextInput
+                        style={[styles.setInput, { flex: 1 }]}
+                        value={reps}
+                        onChangeText={setReps}
+                        keyboardType="numeric"
+                        placeholder="reps"
+                        placeholderTextColor={colors.text.tertiary}
+                        selectTextOnFocus
+                      />
+                    )}
                   </>
                 ) : (
                   <>
+                    {showWeightInput(exercise.equipment) && (
+                      <View style={[styles.setField, { flex: 1 }]}>
+                        <Text style={styles.pendingFieldText}>
+                          {exercise.target_weight > 0
+                            ? `${exercise.target_weight} lbs`
+                            : '— lbs'}
+                        </Text>
+                      </View>
+                    )}
                     <View style={[styles.setField, { flex: 1 }]}>
                       <Text style={styles.pendingFieldText}>
-                        {exercise.target_weight > 0
-                          ? `${exercise.target_weight} lbs`
-                          : '— lbs'}
-                      </Text>
-                    </View>
-                    <View style={[styles.setField, { flex: 1 }]}>
-                      <Text style={styles.pendingFieldText}>
-                        {exercise.target_reps} reps
+                        {showSecondsInput(exercise.equipment, exercise.name)
+                          ? `${exercise.target_seconds ?? 60}s`
+                          : `${exercise.target_reps} reps`}
                       </Text>
                     </View>
                   </>

@@ -116,6 +116,8 @@ STRICT RULES:
 1. Select exercises ONLY from the provided list (exact exercise IDs).
 2. Default 4-7 exercises; if user requests long session (10+, 2hr), up to 12 exercises — keep "why" concise when many.
 3. Return ONLY valid JSON — no markdown, no backticks, no prose outside the JSON.
+4. BODYWEIGHT: For any exercise with equipment "bodyweight", set target_weight_lbs to 0. Only rep count (and optionally seconds for time-based) apply.
+5. TIME-BASED (planks, dead hangs, L-sit, hollow hold, wall sit, etc.): Set target_weight_lbs to 0, target_reps to "0", and include "target_seconds": 60 (or appropriate duration). The app shows a seconds input for these.
 
 JSON FORMAT (required keys including description and primary_targets):
 {
@@ -135,6 +137,18 @@ JSON FORMAT (required keys including description and primary_targets):
       "order": 1,
       "primary_muscle": "chest",
       "why": "Reason including fatigue context if relevant."
+    },
+    {
+      "exercise_id": "uuid",
+      "name": "Plank",
+      "sets": 3,
+      "target_reps": "0",
+      "target_weight_lbs": 0,
+      "target_seconds": 60,
+      "rest_seconds": 60,
+      "order": 2,
+      "primary_muscle": "abs",
+      "why": "Core stability."
     }
   ]
 }`;

@@ -10,6 +10,7 @@ export interface ActiveExercise {
   sets: number;
   target_reps: string;
   target_weight: number;
+  target_seconds?: number;
   rest_seconds: number;
   why?: string;
 }
@@ -19,6 +20,7 @@ export interface CompletedSet {
   setIndex: number;
   weight: number;
   reps: number;
+  seconds?: number;
   timestamp: number;
 }
 
@@ -40,7 +42,7 @@ export interface WorkoutState {
     source: 'ai_generated' | 'custom',
     exercises: ActiveExercise[],
   ) => void;
-  logSet: (weight: number, reps: number) => void;
+  logSet: (weight: number, reps: number, seconds?: number) => void;
   advanceAfterRest: () => void;
   skipRest: () => void;
   setResting: (resting: boolean, seconds: number) => void;
@@ -88,13 +90,14 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
     persist(newState);
   },
 
-  logSet: (weight, reps) => {
+  logSet: (weight, reps, seconds) => {
     const state = get();
     const completed: CompletedSet = {
       exerciseIndex: state.currentExIndex,
       setIndex: state.currentSetIndex,
       weight,
       reps,
+      ...(seconds != null ? { seconds } : {}),
       timestamp: Date.now(),
     };
     const newCompleted = [...state.completedSets, completed];

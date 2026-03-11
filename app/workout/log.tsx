@@ -30,29 +30,40 @@ import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
 import { getLocalDateString } from '@/utils/date';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
 import { Exercise } from '@/types/exercise';
+import { showWeightInput, showSecondsInput, isBodyweight } from '@/utils/exerciseUtils';
 
 interface LogSet {
   weight: string;
   reps: string;
+  seconds?: string;
 }
 
 interface LogExercise {
   exercise_id: string;
   name: string;
   primary_muscle: string;
+  equipment?: string;
   sets: LogSet[];
 }
 
-function planToLogExercises(plan: GeneratedWorkout): LogExercise[] {
-  return (plan.exercises ?? []).map((ex) => ({
-    exercise_id: ex.exercise_id,
-    name: ex.name,
-    primary_muscle: ex.primary_muscle ?? '',
-    sets: Array.from({ length: ex.sets }, () => ({
-      weight: String(ex.target_weight_lbs ?? 0),
-      reps: ex.target_reps?.split('-')[0] ?? '8',
-    })),
-  }));
+function planToLogExercises(plan: GeneratedWorkout, allExercises: Exercise[]): LogExercise[] {
+  return (plan.exercises ?? []).map((ex) => {
+    const full = allExercises.find((e) => e.id === ex.exercise_id);
+    const equipment = full?.equipment ?? undefined;
+    const timeBased = showSecondsInput(equipment, ex.name);
+    const bw = isBodyweight(equipment);
+    return {
+      exercise_id: ex.exercise_id,
+      name: ex.name,
+      primary_muscle: ex.primary_muscle ?? '',
+      equipment,
+      sets: Array.from({ length: ex.sets }, () =>
+        timeBased
+          ? { weight: '0', reps: '0', seconds: ex.target_seconds ? String(ex.target_seconds) : '60' }
+          : { weight: bw ? '0' : String(ex.target_weight_lbs ?? 0), reps: ex.target_reps?.split('-')[0] ?? '8' }
+      ),
+    };
+  });
 }
 
 export default function WorkoutLogScreen() {
@@ -78,14 +89,16 @@ export default function WorkoutLogScreen() {
   } | null>(null);
   const [editWeight, setEditWeight] = useState('');
   const [editReps, setEditReps] = useState('');
+  const [editSeconds, setEditSeconds] = useState('');
 
   useEffect(() => {
     if (!session?.user?.id) return;
     (async () => {
-      const p = await getTodaysPlan(session.user.id);
-      setPlan(p);
+      const [p, exList] = await Promise.all([getTodaysPlan(session.user.id), fetchExercises()]);
+      setAllExercises(exList);
+      setPlan(p ?? null);
       if (p) {
-        setExercises(planToLogExercises(p));
+        setExercises(planToLogExercises(p, exList));
         setWorkoutName(p.name || 'AI Workout');
         setDurationMinutes(p.estimated_minutes ?? 45);
       } else {
@@ -95,19 +108,17 @@ export default function WorkoutLogScreen() {
     })();
   }, [session?.user?.id]);
 
-  useEffect(() => {
-    fetchExercises().then(setAllExercises).catch(() => {});
-  }, []);
-
   const addSet = (exIdx: number) => {
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== exIdx) return e;
         const last = e.sets[e.sets.length - 1];
-        return {
-          ...e,
-          sets: [...e.sets, { weight: last?.weight ?? '0', reps: last?.reps ?? '8' }],
+        const next = {
+          weight: last?.weight ?? '0',
+          reps: last?.reps ?? '8',
+          ...(last?.seconds != null ? { seconds: last.seconds } : {}),
         };
+        return { ...e, sets: [...e.sets, next] };
       })
     );
   };
@@ -121,14 +132,14 @@ export default function WorkoutLogScreen() {
     );
   };
 
-  const updateSet = (exIdx: number, setIdx: number, weight: string, reps: string) => {
+  const updateSet = (exIdx: number, setIdx: number, weight: string, reps: string, seconds?: string) => {
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== exIdx) return e;
         return {
           ...e,
           sets: e.sets.map((s, si) =>
-            si === setIdx ? { weight, reps } : s
+            si === setIdx ? { ...s, weight, reps, ...(seconds !== undefined ? { seconds } : {}) } : s
           ),
         };
       })
@@ -142,17 +153,21 @@ export default function WorkoutLogScreen() {
 
   const addExercise = (ex: Exercise) => {
     if (exercises.some((e) => e.exercise_id === ex.id)) return;
+    const bw = isBodyweight(ex.equipment);
+    const timeBased = showSecondsInput(ex.equipment, ex.name);
+    const defaultSets = timeBased
+      ? [{ weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }]
+      : bw
+        ? [{ weight: '0', reps: '8' }, { weight: '0', reps: '8' }, { weight: '0', reps: '8' }]
+        : [{ weight: '135', reps: '8' }, { weight: '135', reps: '8' }, { weight: '135', reps: '8' }];
     setExercises((prev) => [
       ...prev,
       {
         exercise_id: ex.id,
         name: ex.name,
         primary_muscle: ex.primary_muscle ?? '',
-        sets: [
-          { weight: '135', reps: '8' },
-          { weight: '135', reps: '8' },
-          { weight: '135', reps: '8' },
-        ],
+        equipment: ex.equipment,
+        sets: defaultSets,
       },
     ]);
     setSearchOpen(false);
@@ -204,19 +219,22 @@ export default function WorkoutLogScreen() {
 
       exercises.forEach((ex, exIdx) => {
         let exVol = 0;
+        const useWeight = showWeightInput(ex.equipment);
+        const useSeconds = showSecondsInput(ex.equipment, ex.name);
         ex.sets.forEach((set, setIdx) => {
-          const w = parseFloat(set.weight) || 0;
+          const w = useWeight ? (parseFloat(set.weight) || 0) : 0;
           const r = parseInt(set.reps, 10) || 0;
-          const vol = w * r;
-          exVol += vol;
+          const sec = useSeconds && set.seconds ? parseInt(set.seconds, 10) : null;
+          exVol += w * r;
           setLogs.push({
             session_id: ws.id,
             exercise_id: ex.exercise_id,
             exercise_name: ex.name,
             exercise_order: exIdx,
             set_number: setIdx + 1,
-            actual_weight: w,
+            actual_weight: useWeight ? w : null,
             actual_reps: r,
+            actual_seconds: sec ?? undefined,
             completed: true,
             is_warmup: false,
             is_pr: false,
@@ -362,22 +380,30 @@ export default function WorkoutLogScreen() {
               </Pressable>
             </View>
             <View style={styles.setPillRow}>
-              {ex.sets.map((set, setIdx) => (
-                <Pressable
-                  key={setIdx}
-                  style={styles.setPill}
-                  onPress={() => {
-                    setEditWeight(set.weight);
-                    setEditReps(set.reps);
-                    setEditingSet({ exIdx, setIdx });
-                  }}
-                  onLongPress={() => removeSet(exIdx, setIdx)}
-                >
-                  <Text style={styles.setPillText}>
-                    {set.weight} x {set.reps}
-                  </Text>
-                </Pressable>
-              ))}
+              {ex.sets.map((set, setIdx) => {
+                const showW = showWeightInput(ex.equipment);
+                const showSec = showSecondsInput(ex.equipment, ex.name);
+                const label = showSec && set.seconds
+                  ? `${set.seconds}s`
+                  : showW
+                    ? `${set.weight} × ${set.reps}`
+                    : `${set.reps} reps`;
+                return (
+                  <Pressable
+                    key={setIdx}
+                    style={styles.setPill}
+                    onPress={() => {
+                      setEditWeight(set.weight);
+                      setEditReps(set.reps);
+                      setEditSeconds(set.seconds ?? '');
+                      setEditingSet({ exIdx, setIdx });
+                    }}
+                    onLongPress={() => removeSet(exIdx, setIdx)}
+                  >
+                    <Text style={styles.setPillText}>{label}</Text>
+                  </Pressable>
+                );
+              })}
               <Pressable style={styles.addSetPill} onPress={() => addSet(exIdx)}>
                 <Ionicons name="add" size={16} color={colors.accent.primary} />
               </Pressable>
@@ -429,24 +455,39 @@ export default function WorkoutLogScreen() {
           <View style={styles.editSheet}>
             <Text style={styles.editTitle}>Edit Set</Text>
             <View style={styles.editRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.editLabel}>Weight</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editWeight}
-                  onChangeText={setEditWeight}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.editLabel}>Reps</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editReps}
-                  onChangeText={setEditReps}
-                  keyboardType="numeric"
-                />
-              </View>
+              {editingSet && showWeightInput(exercises[editingSet.exIdx]?.equipment) && (
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editLabel}>Weight (lbs)</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editWeight}
+                    onChangeText={setEditWeight}
+                    keyboardType="numeric"
+                  />
+                </View>
+              )}
+              {editingSet && showSecondsInput(exercises[editingSet.exIdx]?.equipment, exercises[editingSet.exIdx]?.name) ? (
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editLabel}>Seconds</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editSeconds}
+                    onChangeText={setEditSeconds}
+                    keyboardType="numeric"
+                    placeholder="sec"
+                  />
+                </View>
+              ) : (
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editLabel}>Reps</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editReps}
+                    onChangeText={setEditReps}
+                    keyboardType="numeric"
+                  />
+                </View>
+              )}
             </View>
             <View style={styles.editActionsRow}>
               <Pressable
@@ -464,13 +505,17 @@ export default function WorkoutLogScreen() {
               <Pressable
                 style={styles.editOkBtn}
                 onPress={() => {
-                  if (editingSet)
+                  if (editingSet) {
+                    const ex = exercises[editingSet.exIdx];
+                    const isSec = showSecondsInput(ex?.equipment, ex?.name);
                     updateSet(
                       editingSet.exIdx,
                       editingSet.setIdx,
                       editWeight,
-                      editReps
+                      isSec ? '0' : editReps,
+                      isSec ? editSeconds : undefined
                     );
+                  }
                 }}
               >
                 <Text style={styles.editOkText}>OK</Text>

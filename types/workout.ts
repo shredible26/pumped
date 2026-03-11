@@ -43,6 +43,7 @@ export interface SetLog {
   target_reps: number | null;
   actual_weight: number | null;
   actual_reps: number | null;
+  actual_seconds?: number | null;
   is_warmup: boolean;
   is_pr: boolean;
   completed: boolean;
