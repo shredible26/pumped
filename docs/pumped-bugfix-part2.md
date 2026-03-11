@@ -201,3 +201,11 @@ Test after each step. Do not skip ahead if there are errors.
 ## IMPLEMENTATION STATUS (March 2026)
 
 For current app behavior and file locations, see **docs/pumped-technical-spec-v2.md** §Implementation Status. Program style options everywhere are exactly four: PPL, Upper/Lower, Aesthetic, AI Optimal.
+
+### Additional features (post–Part 2)
+- **Progress — Suggestions**: Personalized numbered suggestions using user volume, muscle distribution, and recovery; includes least-trained muscle with example exercises (e.g. lats → lat pulldowns, rows, pull-ups). See `services/insights.ts` → `generateSuggestions`.
+- **Progress — Volume chart**: Tap any bar to see exact volume value (Alert).
+- **Progress — Muscle Distribution**: Filter by This week / This month / All time. `calculateMuscleDistribution(userId, 'week'|'month'|'all')`.
+- **Past Workouts filters**: Today (default), This Week, This Month, All. Reduces clutter when many workouts exist.
+- **Session detail — Edit & Delete**: Edit opens modal for name and duration; Delete confirms then removes session (and set_logs via cascade) so it disappears from Past Workouts and Today.
+- **Data persistence**: All data stored in Supabase by user; sign out clears local state; sign back in loads that user’s data. See `hooks/useAuth.ts` (profile refetch on login; workout store reset on sign out).

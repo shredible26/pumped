@@ -70,3 +70,24 @@ export async function insertSetLogs(sets: Partial<SetLog>[]): Promise<void> {
   const { error } = await supabase.from('set_logs').insert(sets);
   if (error) throw error;
 }
+
+/** Delete a completed session (and its set_logs via DB cascade). Call after confirming with user. */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('workout_sessions')
+    .delete()
+    .eq('id', sessionId);
+  if (error) throw error;
+}
+
+/** Update session fields (e.g. name, duration_seconds). */
+export async function updateSession(
+  sessionId: string,
+  updates: Partial<Pick<WorkoutSession, 'name' | 'duration_seconds'>>
+): Promise<void> {
+  const { error } = await supabase
+    .from('workout_sessions')
+    .update(updates)
+    .eq('id', sessionId);
+  if (error) throw error;
+}

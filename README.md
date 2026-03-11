@@ -66,47 +66,48 @@ npm run android
 ```
 app/
   (auth)/       welcome, signup, signin, onboarding
-  (tabs)/       home, history, strength, profile (bottom tabs)
-  workout/      preview, active, custom, summary
-  history/      [id] session detail
-components/     (empty — UI components added in later prompts)
+  (tabs)/       index (Today), progress, workouts, profile
+  workout/      preview, active, custom, summary, modifications
+  speedlog/     type selection, editor, save
+  cardio/       log
+  history/      [id] session detail (with Edit & Delete)
+components/     home (BodyMap, RoutineTimeline, etc.), ui (DurationInput, etc.)
 hooks/          useAuth, useFatigue, useWorkout, useHistory, useStrength, useStreak
-services/       supabase client, exercises, workouts, fatigue, ai
-stores/         Zustand stores (auth, workout, profile)
-types/          TypeScript types matching database schema
-utils/          theme tokens, epley formula, recovery model, progression logic
+services/       supabase, exercises, workouts, fatigue, ai, streak, insights, strength, volume
+stores/         authStore, workoutStore
+types/          workout, user, exercise
+utils/          theme, date, schedule, workoutName, units, epley, recoveryModel
 ```
 
-## Current State (Prompt 1 — Scaffold)
+## Features
 
-### Functional
+### Today tab
+- Weekly calendar strip (tap any day; green dot for logged activity; no dot on future days)
+- Date-only header; scheduled vs completed workout cards
+- AI workout generation and Speed Log; rest day card with Customize Cardio, Log Rest Day, Log Cardio, Speed Log
+- Muscle Readiness map (current or historical by selected day)
+- Quick stats (Workouts, Streak, This Week) only on current day
+- This Week's Plan (RoutineTimeline) with schedule from program style and training frequency
 
-- Expo Router file-based navigation with auth gate
-- Dark theme applied globally (`#0A0A0F` background, `#4ADE80` green accent)
-- Bottom tab bar (Home, History, Strength, Profile) with icons
-- Stack navigation for auth flow and workout flow
-- All route transitions wired up (welcome → signup/signin, home → workout preview/custom, etc.)
+### Progress tab
+- **Insights** — rule-based cards (most/least trained muscle, push/pull balance, consistency, streak, recovery)
+- **Suggestions** — personalized numbered list using your volume, muscle distribution, and recovery (e.g. least-trained muscle + example exercises like lat pulldowns, rows)
+- **Big 3** — Strength score and squat/bench/deadlift e1RM from manual entry or logged sets
+- **Volume** — Week/Month/Year toggle; bar chart; tap a bar to see exact volume value
+- **Muscle Distribution** — This week / This month / All time; ranked list with percentages
 
-### Placeholder (built out in later prompts)
+### Workouts tab
+- **Past Workouts** — filters: Today (default), This Week, This Month, All; volume shown in selected units
+- Saved workouts; Create Custom Workout
+- Tapping a past workout opens session detail with **Edit** (name, duration) and **Delete** (removes from DB and all screens)
 
-- **Welcome** — logo, tagline, Get Started / Sign In buttons (styled, navigation works)
-- **Signup / Signin** — form fields and social buttons (UI only, no auth logic yet)
-- **Onboarding** — step indicator and title (multi-step form built in Prompt 3)
-- **Home** — today's workout card, strength score card, body map placeholder, quick stats
-- **Workout Preview** — empty state, Start Workout button
-- **Active Workout** — set row UI skeleton, Complete Set button
-- **Custom Workout** — name input, Add Exercise button
-- **Workout Summary** — celebration layout, stats grid
-- **History** — stats row, empty state
-- **Session Detail** — header, empty state
-- **Strength** — score card, lift cards, chart placeholder
-- **Profile** — avatar, stats, settings list, sign out button
+### Profile tab
+- Editable display name; profile picture (avatar upload to Supabase Storage)
+- Program style, Days/week, Equipment, Body stats (height, weight, manual 1RMs), Units (lbs/kg)
+- Sign out; all data is stored per account (Supabase); log out and back in to see the same data
 
-### Not yet connected
+### Units
+- Profile → Units: lbs/ft-in or kg/cm. All numeric data (weights, volume, Big 3, body stats) updates across the app.
 
-- Supabase auth (Prompt 2)
-- Database reads/writes (Prompt 2)
-- Onboarding flow (Prompt 3)
-- Body map SVG (Prompt 4)
-- Active workout logging with MMKV persistence (Prompt 5)
-- AI workout generation edge function (Prompt 7)
+### Data persistence
+- Workouts, sets, profile, fatigue, streaks, and AI plans are stored in Supabase keyed by user. Sign out clears local state; signing back in loads that user’s data. Active workout draft is cleared on sign out.

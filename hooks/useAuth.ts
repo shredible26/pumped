@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import { supabase } from '@/services/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { useWorkoutStore } from '@/stores/workoutStore';
 import { Profile } from '@/types/user';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -128,6 +129,7 @@ export function useAuth() {
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    useWorkoutStore.getState().reset();
     reset();
   };
 

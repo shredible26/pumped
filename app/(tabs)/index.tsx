@@ -183,7 +183,10 @@ export default function TodayScreen() {
       fetchSessionsForDate(selectedDate);
       fetchWeekWorkouts();
       refreshFatigue();
-    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, refreshFatigue])
+      if (session?.user?.id && !isSameDay(selectedDate, new Date()) && !isAfter(startOfDay(selectedDate), startOfDay(new Date()))) {
+        getHistoricalFatigueMap(session.user.id, selectedDate).then(setHistoricalFatigueMap);
+      }
+    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, refreshFatigue, session?.user?.id])
   );
 
   useEffect(() => {
@@ -361,6 +364,7 @@ export default function TodayScreen() {
         {/* Today + workout(s) already logged: show list of sessions (like past day), no AI card */}
         {isSelectedToday && !isRestDay && sessionsForSelectedDate.length > 0 && (
           <View style={styles.pastSessionsContainer}>
+            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             <Pressable
               style={styles.speedLogButtonStandalone}
               onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
@@ -459,50 +463,83 @@ export default function TodayScreen() {
         )}
 
         {isSelectedToday && isRestDay && (
-          <View style={styles.restCard}>
-            <Text style={styles.restEmoji}>🏃</Text>
-            <Text style={styles.restTitle}>Active Recovery</Text>
-            <Text style={styles.restSubtext}>
-              30 min light cardio recommended — e.g. incline walk or bike. Keeps blood flowing without adding fatigue.
-            </Text>
-            <View style={styles.restButtonColumn}>
-              <Pressable
-                style={[styles.restDayButton, styles.restDayButtonFirst]}
-                onPress={() => router.push('/workout/modifications')}
-              >
-                <Ionicons name="sparkles" size={18} color={colors.text.inverse} />
-                <Text style={styles.startButtonText}>Customize Cardio</Text>
-              </Pressable>
-              <Pressable
-                style={styles.restDayButton}
-                onPress={() => void handleLogRestDay()}
-                disabled={loggingRestDay}
-              >
-                <Ionicons name="body-outline" size={18} color={colors.text.inverse} />
-                <Text style={styles.startButtonText}>
-                  {loggingRestDay ? 'Logging…' : 'Log Rest Day'}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={styles.restDayButton}
-                onPress={() => router.push('/cardio/log')}
-              >
-                <Ionicons name="bicycle" size={18} color={colors.text.inverse} />
-                <Text style={styles.startButtonText}>Log Cardio</Text>
-              </Pressable>
-              <Pressable
-                style={styles.restDayButton}
-                onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
-              >
-                <Ionicons name="flash" size={18} color={colors.text.inverse} />
-                <Text style={styles.startButtonText}>Speed Log</Text>
-              </Pressable>
+          <>
+            <View style={styles.restCard}>
+              <Text style={styles.restEmoji}>🏃</Text>
+              <Text style={styles.restTitle}>Active Recovery</Text>
+              <Text style={styles.restSubtext}>
+                30 min light cardio recommended — e.g. incline walk or bike. Keeps blood flowing without adding fatigue.
+              </Text>
+              <View style={styles.restButtonColumn}>
+                <Pressable
+                  style={[styles.restDayButton, styles.restDayButtonFirst]}
+                  onPress={() => router.push('/workout/modifications')}
+                >
+                  <Ionicons name="sparkles" size={18} color={colors.text.inverse} />
+                  <Text style={styles.startButtonText}>Customize Cardio</Text>
+                </Pressable>
+                {sessionsForSelectedDate.length === 0 && (
+                  <Pressable
+                    style={styles.restDayButton}
+                    onPress={() => void handleLogRestDay()}
+                    disabled={loggingRestDay}
+                  >
+                    <Ionicons name="body-outline" size={18} color={colors.text.inverse} />
+                    <Text style={styles.startButtonText}>
+                      {loggingRestDay ? 'Logging…' : 'Log Rest Day'}
+                    </Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={styles.restDayButton}
+                  onPress={() => router.push('/cardio/log')}
+                >
+                  <Ionicons name="bicycle" size={18} color={colors.text.inverse} />
+                  <Text style={styles.startButtonText}>Log Cardio</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.restDayButton}
+                  onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
+                >
+                  <Ionicons name="flash" size={18} color={colors.text.inverse} />
+                  <Text style={styles.startButtonText}>Speed Log</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+            {sessionsForSelectedDate.length > 0 && (
+              <View style={styles.pastSessionsContainer}>
+                <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
+                {sessionsForSelectedDate.map((sess) => (
+                  <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
+                    <View style={styles.workoutCardHeader}>
+                      <View style={styles.workoutIconBox}>
+                        <Ionicons name="barbell" size={18} color={colors.accent.primary} />
+                      </View>
+                    </View>
+                    <Text style={styles.workoutType}>{sess.name}</Text>
+                    <Text style={styles.programName}>
+                      {format(selectedDate, 'MMM d, yyyy')}
+                      {sess.completed_at
+                        ? ` · ${format(new Date(sess.completed_at), 'h:mm a')}`
+                        : ''}
+                    </Text>
+                    <Pressable
+                      style={styles.startButton}
+                      onPress={() => router.push(`/history/${sess.id}`)}
+                    >
+                      <Ionicons name="open-outline" size={18} color={colors.text.inverse} />
+                      <Text style={styles.startButtonText}>View Workout</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
         )}
 
         {!isSelectedToday && !isSelectedFuture && sessionsForSelectedDate.length > 0 && (
           <View style={styles.pastSessionsContainer}>
+            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             <Pressable
               style={styles.speedLogButtonStandalone}
               onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
@@ -704,6 +741,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 
+  workoutsCompletedLabel: {
+    fontSize: font.xs,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
   pastSessionsContainer: {
     gap: spacing.md,
     paddingHorizontal: spacing.xl,

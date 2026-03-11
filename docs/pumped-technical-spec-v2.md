@@ -1148,7 +1148,8 @@ Use this section so an agentic IDE can pick up exactly where development left of
 
 ## Past Workouts (Workouts tab)
 - **File**: `app/(tabs)/workouts.tsx`. Fetches completed sessions (e.g. limit 500), **excludes** rows where `is_rest_day === true` so only real workouts/cardio appear. Rendered with `.map()` inside ScrollView (no nested VirtualizedList).
-- **Date display**: `format(parseLocalDate(w.date), 'MMM d')`.
+- **Filters**: Today (default), This Week, This Month, All. Filter state `pastFilter`; list is filtered by date range using `parseLocalDate` and `isWithinInterval` (week = Mon–Sun, month = current month).
+- **Date display**: `format(parseLocalDate(w.date), 'MMM d')`. Volume uses `formatVolumeCompact(..., units)`.
 
 ## Workout names
 - **AI-generated name**: When the user does not set a name (or uses a generic placeholder), use `generateWorkoutNameFromExercises(exercises)` from `utils/workoutName.ts` and save that as `session.name`. Used in `app/workout/log.tsx` and `app/speedlog/editor.tsx`.
@@ -1164,16 +1165,30 @@ Use this section so an agentic IDE can pick up exactly where development left of
 - **Past day**: `getHistoricalFatigueMap(userId, selectedDate)` in `services/fatigue.ts` recomputes recovery from all sessions/set_logs up to that date. BodyMap and MuscleDetailSheet use this map when a past day is selected.
 - **Future day**: Body map and detail sheet receive empty map.
 
+## Progress tab — Insights & Suggestions
+- **Insights**: `services/insights.ts` → `generateInsights(userId)` returns cards (most/least muscle, push-pull, consistency, streak, recovery).
+- **Suggestions**: `generateSuggestions(userId)` returns 3–5 personalized bullet points using volume, muscle distribution, fatigue, and target days. Includes least-trained muscle with example exercises (e.g. lats → lat pulldowns, bent-over rows, pull-ups). Uses `EXERCISE_SUGGESTIONS_BY_MUSCLE` for per-muscle exercise examples.
+- **Volume chart**: Tap a bar to show exact volume (Alert). Uses `getVolumeChartData(userId, period)` from `services/volume.ts`.
+- **Muscle Distribution**: Periods **This week**, **This month**, **All time**. `calculateMuscleDistribution(userId, 'week'|'month'|'all')` in `services/volume.ts`.
+
+## Session detail — Edit & Delete
+- **File**: `app/history/[id].tsx`. **Edit** button opens modal to change session name and duration (minutes); saves via `updateSession(id, { name, duration_seconds })` in `services/workouts.ts`.
+- **Delete** button shows confirmation Alert; on confirm calls `deleteSession(id)` which deletes the row (set_logs cascade). Then `router.back()`. Today and Workouts tabs refetch on focus so the deleted workout disappears everywhere.
+
 ## Key file reference
 | Purpose | Path |
 |--------|------|
 | Home / Today | `app/(tabs)/index.tsx` |
 | Workouts tab (Past Workouts) | `app/(tabs)/workouts.tsx` |
-| Session detail | `app/history/[id].tsx` |
+| Session detail (Edit/Delete) | `app/history/[id].tsx` |
 | Speed Log entry, editor | `app/speedlog/index.tsx`, `app/speedlog/editor.tsx` |
 | Schedule logic | `utils/schedule.ts` |
 | Date parsing/formatting | `utils/date.ts` |
 | Workout name from exercises | `utils/workoutName.ts` |
+| Units (lbs/kg) | `utils/units.ts` |
+| Insights & Suggestions | `services/insights.ts` |
+| Volume & muscle distribution | `services/volume.ts` |
+| Session delete/update | `services/workouts.ts` → `deleteSession`, `updateSession` |
 | Historical fatigue | `services/fatigue.ts` → `getHistoricalFatigueMap` |
 | Streak | `services/streak.ts` → `calculateStreak`, `updateProfileStreak` |
 

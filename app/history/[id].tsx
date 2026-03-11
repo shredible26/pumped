@@ -6,14 +6,21 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { parseLocalDate } from '@/utils/date';
+import { formatWeight, formatVolumeCompact, type Units } from '@/utils/units';
 import { colors, font, spacing, radius } from '@/utils/theme';
-import { fetchSessionById, fetchSessionSets } from '@/services/workouts';
+import { useAuthStore } from '@/stores/authStore';
+import { fetchSessionById, fetchSessionSets, deleteSession, updateSession } from '@/services/workouts';
 import type { WorkoutSession, SetLog } from '@/types/workout';
 
 function groupSetsByExercise(sets: SetLog[]): { name: string; sets: SetLog[] }[] {
@@ -34,10 +41,16 @@ function groupSetsByExercise(sets: SetLog[]): { name: string; sets: SetLog[] }[]
 export default function SessionDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const profile = useAuthStore((s) => s.profile);
+  const units: Units = (profile as { units?: Units })?.units ?? 'lbs';
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [sets, setSets] = useState<SetLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editVisible, setEditVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDurationMin, setEditDurationMin] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -103,6 +116,52 @@ export default function SessionDetailScreen() {
     : null;
   const grouped = groupSetsByExercise(sets);
 
+  const handleDelete = () => {
+    Alert.alert(
+      'Delete workout',
+      'This will permanently remove this workout from your history. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!id) return;
+            setDeleting(true);
+            try {
+              await deleteSession(id);
+              router.back();
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to delete workout');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const openEdit = () => {
+    setEditName(session.name);
+    setEditDurationMin(session.duration_seconds ? String(Math.round(session.duration_seconds / 60)) : '');
+    setEditVisible(true);
+  };
+
+  const saveEdit = async () => {
+    if (!id) return;
+    const name = editName.trim() || session.name;
+    const mins = parseInt(editDurationMin, 10);
+    const duration_seconds = Number.isNaN(mins) || mins < 0 ? null : mins * 60;
+    try {
+      await updateSession(id, { name, duration_seconds: duration_seconds ?? undefined });
+      setSession((s) => (s ? { ...s, name, duration_seconds } : null));
+      setEditVisible(false);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update workout');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -110,7 +169,16 @@ export default function SessionDetailScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Session Detail</Text>
-        <View style={{ width: 24 }} />
+        <View style={styles.headerActions}>
+          <Pressable onPress={openEdit} style={styles.headerButton} disabled={deleting}>
+            <Ionicons name="pencil" size={20} color={colors.accent.primary} />
+            <Text style={styles.headerButtonText}>Edit</Text>
+          </Pressable>
+          <Pressable onPress={handleDelete} style={[styles.headerButton, styles.headerButtonDanger]} disabled={deleting}>
+            <Ionicons name="trash-outline" size={20} color={colors.error} />
+            <Text style={[styles.headerButtonText, styles.headerButtonTextDanger]}>Delete</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -132,10 +200,7 @@ export default function SessionDetailScreen() {
             <View style={styles.stat}>
               <Ionicons name="barbell-outline" size={16} color={colors.text.secondary} />
               <Text style={styles.statText}>
-                {session.total_volume >= 1000
-                  ? `${(session.total_volume / 1000).toFixed(1)}k`
-                  : session.total_volume}{' '}
-                lbs
+                {formatVolumeCompact(session.total_volume, units)}
               </Text>
             </View>
           )}
@@ -174,7 +239,7 @@ export default function SessionDetailScreen() {
                       <Text style={styles.setLabel}>Set {set.set_number}</Text>
                       <Text style={styles.setValue}>
                         {set.actual_weight != null && set.actual_reps != null
-                          ? `${set.actual_weight} lbs × ${set.actual_reps} reps`
+                          ? `${formatWeight(set.actual_weight, units)} × ${set.actual_reps} reps`
                           : '—'}
                       </Text>
                       {set.is_pr && (
@@ -196,6 +261,44 @@ export default function SessionDetailScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal visible={editVisible} transparent animationType="fade">
+        <Pressable style={styles.modalOverlay} onPress={() => setEditVisible(false)}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalKeyboardWrap}
+          >
+            <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.modalTitle}>Edit workout</Text>
+              <Text style={styles.inputLabel}>Name</Text>
+              <TextInput
+                style={styles.textInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Workout name"
+                placeholderTextColor={colors.text.tertiary}
+              />
+              <Text style={styles.inputLabel}>Duration (minutes)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={editDurationMin}
+                onChangeText={setEditDurationMin}
+                placeholder="e.g. 45"
+                placeholderTextColor={colors.text.tertiary}
+                keyboardType="number-pad"
+              />
+              <View style={styles.modalButtons}>
+                <Pressable style={styles.modalButtonSecondary} onPress={() => setEditVisible(false)}>
+                  <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={styles.modalButtonPrimary} onPress={saveEdit}>
+                  <Text style={styles.modalButtonPrimaryText}>Save</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -213,9 +316,95 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   headerTitle: {
+    fontSize: font.lg,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  headerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  headerButtonDanger: {},
+  headerButtonText: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.accent.primary,
+  },
+  headerButtonTextDanger: {
+    color: colors.error,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalKeyboardWrap: {
+    width: '100%',
+  },
+  modalSheet: {
+    backgroundColor: colors.bg.card,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    paddingBottom: 40,
+  },
+  modalTitle: {
     fontSize: font.xl,
     fontWeight: '700',
     color: colors.text.primary,
+    marginBottom: spacing.lg,
+  },
+  inputLabel: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  textInput: {
+    backgroundColor: colors.bg.input,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    fontSize: font.md,
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  modalButtonPrimary: {
+    flex: 1,
+    backgroundColor: colors.accent.primary,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  modalButtonPrimaryText: {
+    color: colors.text.inverse,
+    fontWeight: '700',
+    fontSize: font.md,
+  },
+  modalButtonSecondary: {
+    flex: 1,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  modalButtonSecondaryText: {
+    color: colors.text.secondary,
+    fontSize: font.md,
   },
   center: {
     flex: 1,

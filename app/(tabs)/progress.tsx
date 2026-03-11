@@ -6,104 +6,79 @@ import {
   ScrollView,
   Pressable,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
-import { supabase } from '@/services/supabase';
+import { formatWeight, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
+import { generateInsights, generateSuggestions, type Insight } from '@/services/insights';
+import { getBig3, type Big3Result } from '@/services/strength';
+import {
+  calculateMuscleDistribution,
+  getVolumeChartData,
+  type MuscleDistributionEntry,
+  type VolumeEntry,
+} from '@/services/volume';
 
-interface VolumeEntry {
-  label: string;
-  volume: number;
-}
-
-interface MuscleVolume {
-  muscle: string;
-  volume: number;
-  percentage: number;
-}
+const MUSCLE_LABELS: Record<string, string> = {
+  chest: 'Chest',
+  front_delts: 'Front delts',
+  side_delts: 'Side delts',
+  rear_delts: 'Rear delts',
+  lats: 'Lats',
+  traps: 'Traps',
+  biceps: 'Biceps',
+  triceps: 'Triceps',
+  forearms: 'Forearms',
+  abs: 'Abs',
+  quads: 'Quads',
+  hamstrings: 'Hamstrings',
+  glutes: 'Glutes',
+  calves: 'Calves',
+};
 
 export default function ProgressScreen() {
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
+  const units: Units = (profile as { units?: Units })?.units ?? 'lbs';
 
   const [refreshing, setRefreshing] = useState(false);
-  const [totalVolume, setTotalVolume] = useState(0);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [big3, setBig3] = useState<Big3Result | null>(null);
   const [volumePeriod, setVolumePeriod] = useState<'week' | 'month' | 'year'>('week');
-  const [muscleDistribution, setMuscleDistribution] = useState<MuscleVolume[]>([]);
-  const [weeklyVolume, setWeeklyVolume] = useState<VolumeEntry[]>([]);
-  const [insights, setInsights] = useState<string[]>([]);
+  const [volumeData, setVolumeData] = useState<{ entries: VolumeEntry[]; total: number }>({
+    entries: [],
+    total: 0,
+  });
+  const [muscleDistribution, setMuscleDistribution] = useState<MuscleDistributionEntry[]>([]);
+  const [distributionPeriod, setDistributionPeriod] = useState<'week' | 'month' | 'all'>('month');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
 
   const totalWorkouts = profile?.total_workouts ?? 0;
   const streak = profile?.current_streak_days ?? 0;
-  const strengthScore = profile?.strength_score ?? 0;
-  const squat = profile?.squat_e1rm ?? 0;
-  const bench = profile?.bench_e1rm ?? 0;
-  const deadlift = profile?.deadlift_e1rm ?? 0;
 
   const fetchData = useCallback(async () => {
     if (!session?.user?.id) return;
     const userId = session.user.id;
-
     try {
-      const { data: sets } = await supabase
-        .from('set_logs')
-        .select('exercise_name, actual_weight, actual_reps, created_at')
-        .order('created_at', { ascending: false })
-        .limit(500);
-
-      if (sets && sets.length > 0) {
-        let vol = 0;
-        const muscleMap = new Map<string, number>();
-
-        for (const s of sets) {
-          const v = (s.actual_weight ?? 0) * (s.actual_reps ?? 0);
-          vol += v;
-          const name = (s.exercise_name ?? '').toLowerCase();
-          let muscle = 'other';
-          if (name.includes('bench') || name.includes('chest') || name.includes('fly')) muscle = 'Chest';
-          else if (name.includes('squat') || name.includes('leg press') || name.includes('lunge')) muscle = 'Legs';
-          else if (name.includes('deadlift') || name.includes('row') || name.includes('pulldown') || name.includes('pull-up')) muscle = 'Back';
-          else if (name.includes('press') || name.includes('lateral') || name.includes('shoulder')) muscle = 'Shoulders';
-          else if (name.includes('curl') || name.includes('tricep') || name.includes('extension')) muscle = 'Arms';
-          else if (name.includes('crunch') || name.includes('plank') || name.includes('ab')) muscle = 'Core';
-
-          if (muscle !== 'other') {
-            muscleMap.set(muscle, (muscleMap.get(muscle) ?? 0) + v);
-          }
-        }
-
-        setTotalVolume(vol);
-
-        const totalMuscleVol = Array.from(muscleMap.values()).reduce((a, b) => a + b, 0);
-        const dist = Array.from(muscleMap.entries())
-          .map(([muscle, volume]) => ({
-            muscle,
-            volume,
-            percentage: totalMuscleVol > 0 ? Math.round((volume / totalMuscleVol) * 100) : 0,
-          }))
-          .sort((a, b) => b.percentage - a.percentage);
-        setMuscleDistribution(dist);
-
-        // Generate rule-based insights
-        const ins: string[] = [];
-        if (totalWorkouts >= 5) {
-          const pushVol = (muscleMap.get('Chest') ?? 0) + (muscleMap.get('Shoulders') ?? 0);
-          const pullVol = muscleMap.get('Back') ?? 0;
-          if (pushVol > 0 && pullVol > 0) {
-            const ratio = pushVol / pullVol;
-            if (ratio > 2) ins.push('Your push:pull volume ratio is high — consider adding more pulling exercises.');
-          }
-          const legVol = muscleMap.get('Legs') ?? 0;
-          if (legVol === 0 && totalWorkouts > 3) {
-            ins.push("You haven't trained legs recently. Don't skip leg day!");
-          }
-        }
-        setInsights(ins);
-      }
-    } catch {}
-  }, [session?.user?.id, totalWorkouts]);
+      const [insightsRes, big3Res, distRes, volRes, suggestionsRes] = await Promise.all([
+        generateInsights(userId),
+        getBig3(userId),
+        calculateMuscleDistribution(userId, distributionPeriod),
+        getVolumeChartData(userId, volumePeriod),
+        generateSuggestions(userId),
+      ]);
+      setInsights(insightsRes);
+      setBig3(big3Res);
+      setMuscleDistribution(distRes);
+      setVolumeData(volRes);
+      setSuggestions(suggestionsRes);
+    } catch (e) {
+      console.warn('Progress fetch error', e);
+    }
+  }, [session?.user?.id, distributionPeriod, volumePeriod]);
 
   useEffect(() => {
     fetchData();
@@ -116,6 +91,13 @@ export default function ProgressScreen() {
   }, [fetchData]);
 
   const needsMoreWorkouts = totalWorkouts < 5;
+  const maxChartVol = Math.max(...volumeData.entries.map((e) => e.volume), 1);
+
+  const insightIconColor = (type: Insight['type']) => {
+    if (type === 'positive') return colors.accent.primary;
+    if (type === 'warning') return '#F97316';
+    return '#3B82F6';
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -131,7 +113,6 @@ export default function ProgressScreen() {
       >
         <Text style={styles.title}>Progress</Text>
 
-        {/* Stats pills */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -147,12 +128,8 @@ export default function ProgressScreen() {
             <Text style={styles.statPillLabel}>day streak</Text>
           </View>
           <View style={styles.statPill}>
-            <Text style={styles.statPillValue}>
-              {totalVolume >= 1000
-                ? `${(totalVolume / 1000).toFixed(1)}k`
-                : totalVolume}
-            </Text>
-            <Text style={styles.statPillLabel}>lbs total</Text>
+            <Text style={styles.statPillValue}>{formatVolumeWithUnit(volumeData.total, units).replace(` ${units}`, '')}</Text>
+            <Text style={styles.statPillLabel}>{units} total</Text>
           </View>
         </ScrollView>
 
@@ -164,6 +141,7 @@ export default function ProgressScreen() {
           <View style={styles.insightCard}>
             <Ionicons name="sparkles" size={20} color={colors.accent.primary} />
             <View style={{ flex: 1 }}>
+              <Text style={styles.insightTitle}>Unlock insights</Text>
               <Text style={styles.insightText}>
                 Log {5 - totalWorkouts} more workout
                 {5 - totalWorkouts !== 1 ? 's' : ''} to unlock insights
@@ -179,51 +157,80 @@ export default function ProgressScreen() {
             </View>
           </View>
         ) : insights.length > 0 ? (
-          insights.map((text, i) => (
+          insights.map((insight, i) => (
             <View key={i} style={styles.insightCard}>
-              <Ionicons name="bulb" size={18} color={colors.accent.primary} />
-              <Text style={[styles.insightText, { flex: 1 }]}>{text}</Text>
+              <View
+                style={[
+                  styles.insightIconWrap,
+                  { backgroundColor: `${insightIconColor(insight.type)}20` },
+                ]}
+              >
+                <Text style={styles.insightEmoji}>{insight.icon}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.insightTitle}>{insight.title}</Text>
+                <Text style={styles.insightText}>{insight.description}</Text>
+              </View>
             </View>
           ))
         ) : (
           <View style={styles.insightCard}>
             <Ionicons name="checkmark-circle" size={18} color={colors.accent.primary} />
-            <Text style={[styles.insightText, { flex: 1 }]}>
-              Looking good! No imbalances detected.
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.insightTitle}>Looking good</Text>
+              <Text style={styles.insightText}>No imbalances detected. Keep it up!</Text>
+            </View>
           </View>
         )}
 
-        {/* Big 3 Lifts */}
+        {/* Suggestions — numeric bullet list */}
+        {!needsMoreWorkouts && suggestions.length > 0 && (
+          <>
+            <Text style={styles.sectionHeader}>Suggestions</Text>
+            <View style={styles.suggestionsCard}>
+              {suggestions.map((line, idx) => (
+                <Text key={idx} style={styles.suggestionItem}>
+                  {idx + 1}. {line}
+                </Text>
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* Big 3 */}
         <View style={styles.sectionHeaderRow}>
           <Ionicons name="trophy" size={16} color={colors.text.secondary} />
           <Text style={styles.sectionHeader}>Big 3 Lifts</Text>
         </View>
 
-        {strengthScore > 0 ? (
+        {big3 && big3.total > 0 ? (
           <>
             <View style={styles.scoreCard}>
               <Text style={styles.scoreLabel}>STRENGTH SCORE</Text>
-              <Text style={styles.scoreNumber}>
-                {strengthScore.toLocaleString()}
-              </Text>
+              <Text style={styles.scoreNumber}>{Math.round(big3.total).toLocaleString()}</Text>
             </View>
-
             {[
-              { name: 'Squat', value: squat },
-              { name: 'Bench Press', value: bench },
-              { name: 'Deadlift', value: deadlift },
-            ].map((lift) => (
-              <View key={lift.name} style={styles.liftCard}>
-                <Text style={styles.liftName}>{lift.name}</Text>
-                <Text style={styles.liftE1rm}>
-                  {lift.value > 0 ? `${lift.value} lbs` : '— lbs'}
-                </Text>
-                <Text style={styles.liftBasis}>
-                  {lift.value > 0 ? 'Estimated 1RM' : 'No data yet'}
-                </Text>
-              </View>
-            ))}
+              { key: 'squat' as const, name: 'Squat' },
+              { key: 'bench' as const, name: 'Bench Press' },
+              { key: 'deadlift' as const, name: 'Deadlift' },
+            ].map(({ key, name }) => {
+              const entry = big3[key];
+              return (
+                <View key={key} style={styles.liftCard}>
+                  <Text style={styles.liftName}>{name}</Text>
+                  <Text style={styles.liftE1rm}>
+                    {entry ? formatWeight(entry.value, units) : '—'}
+                  </Text>
+                  <Text style={styles.liftBasis}>
+                    {entry
+                      ? entry.date
+                        ? `${entry.source} on ${entry.date}`
+                        : entry.source
+                      : `Log a ${key} to track`}
+                  </Text>
+                </View>
+              );
+            })}
           </>
         ) : (
           <View style={styles.emptyBig3}>
@@ -234,7 +241,7 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Volume */}
+        {/* Volume chart */}
         <Text style={styles.sectionHeader}>Volume</Text>
         <View style={styles.volumeToggle}>
           {(['week', 'month', 'year'] as const).map((p) => (
@@ -259,31 +266,124 @@ export default function ProgressScreen() {
         </View>
         <View style={styles.volumeCard}>
           <Text style={styles.volumeNumber}>
-            {totalVolume >= 1000
-              ? `${(totalVolume / 1000).toFixed(1)}K`
-              : totalVolume}
+            {formatVolumeWithUnit(volumeData.total, units).replace(` ${units}`, '')}
           </Text>
-          <Text style={styles.volumeUnit}>lbs</Text>
+          <Text style={styles.volumeUnit}>{units}</Text>
         </View>
-
-        {/* Muscle Distribution */}
-        <Text style={styles.sectionHeader}>Muscle Distribution</Text>
-        {muscleDistribution.length > 0 ? (
-          <View style={styles.distributionCard}>
-            {muscleDistribution.map((m) => (
-              <View key={m.muscle} style={styles.distRow}>
-                <Text style={styles.distMuscle}>{m.muscle}</Text>
-                <View style={styles.distBarBg}>
+        {volumeData.entries.length > 0 && (
+          <View style={styles.chartRow}>
+            {volumeData.entries.map((e, i) => (
+              <Pressable
+                key={i}
+                style={styles.chartBarWrap}
+                onPress={() =>
+                  Alert.alert(
+                    e.label,
+                    `Volume: ${formatVolumeWithUnit(e.volume, units)}`
+                  )
+                }
+              >
+                <View style={styles.chartBarBg}>
                   <View
                     style={[
-                      styles.distBarFill,
-                      { width: `${m.percentage}%` },
+                      styles.chartBarFill,
+                      {
+                        height: `${Math.max(8, (e.volume / maxChartVol) * 100)}%`,
+                      },
                     ]}
                   />
                 </View>
-                <Text style={styles.distPct}>{m.percentage}%</Text>
-              </View>
+                <Text style={styles.chartLabel}>{e.label}</Text>
+              </Pressable>
             ))}
+          </View>
+        )}
+
+        {/* Muscle Distribution */}
+        <Text style={styles.sectionHeader}>Muscle Distribution</Text>
+        <View style={styles.distToggle}>
+          <Pressable
+            style={[
+              styles.distToggleBtn,
+              distributionPeriod === 'week' && styles.distToggleBtnActive,
+            ]}
+            onPress={() => setDistributionPeriod('week')}
+          >
+            <Text
+              style={[
+                styles.distToggleText,
+                distributionPeriod === 'week' && styles.distToggleTextActive,
+              ]}
+            >
+              This week
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.distToggleBtn,
+              distributionPeriod === 'month' && styles.distToggleBtnActive,
+            ]}
+            onPress={() => setDistributionPeriod('month')}
+          >
+            <Text
+              style={[
+                styles.distToggleText,
+                distributionPeriod === 'month' && styles.distToggleTextActive,
+              ]}
+            >
+              This month
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.distToggleBtn,
+              distributionPeriod === 'all' && styles.distToggleBtnActive,
+            ]}
+            onPress={() => setDistributionPeriod('all')}
+          >
+            <Text
+              style={[
+                styles.distToggleText,
+                distributionPeriod === 'all' && styles.distToggleTextActive,
+              ]}
+            >
+              All time
+            </Text>
+          </Pressable>
+        </View>
+        {muscleDistribution.length > 0 ? (
+          <View style={styles.distributionCard}>
+            {muscleDistribution.map((m, idx) => {
+              const label = MUSCLE_LABELS[m.muscle] ?? m.muscle;
+              const isBottom = idx >= muscleDistribution.length - 3;
+              return (
+                <View key={m.muscle} style={styles.distRow}>
+                  <View style={{ width: 88 }}>
+                    <Text
+                      style={[
+                        styles.distMuscle,
+                        isBottom && styles.distMuscleWarning,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {label}
+                    </Text>
+                    {isBottom && (
+                      <Text style={styles.distHint}>Consider adding more {label.toLowerCase()} work</Text>
+                    )}
+                  </View>
+                  <View style={styles.distBarBg}>
+                    <View
+                      style={[
+                        styles.distBarFill,
+                        { width: `${Math.min(100, m.percentage)}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.distPct}>{m.percentage}%</Text>
+                </View>
+              );
+            })}
           </View>
         ) : (
           <View style={styles.emptyCard}>
@@ -359,6 +459,22 @@ const styles = StyleSheet.create({
     borderColor: colors.border.default,
     marginBottom: spacing.sm,
   },
+  insightIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightEmoji: {
+    fontSize: 18,
+  },
+  insightTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
   insightText: {
     fontSize: font.md,
     color: colors.text.secondary,
@@ -375,6 +491,20 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: colors.accent.primary,
     borderRadius: 2,
+  },
+  suggestionsCard: {
+    backgroundColor: colors.bg.card,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  suggestionItem: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    lineHeight: 22,
   },
 
   scoreCard: {
@@ -477,7 +607,63 @@ const styles = StyleSheet.create({
     fontSize: font.lg,
     color: colors.text.secondary,
   },
+  chartRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: 100,
+    marginTop: spacing.sm,
+    paddingHorizontal: 4,
+  },
+  chartBarWrap: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  chartBarBg: {
+    width: '80%',
+    flex: 1,
+    backgroundColor: colors.bg.input,
+    borderRadius: 4,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+  },
+  chartBarFill: {
+    width: '100%',
+    backgroundColor: colors.accent.primary,
+    borderRadius: 4,
+    minHeight: 4,
+  },
+  chartLabel: {
+    fontSize: 10,
+    color: colors.text.tertiary,
+    marginTop: 4,
+  },
 
+  distToggle: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  distToggleBtn: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  distToggleBtnActive: {
+    backgroundColor: colors.accent.bg,
+    borderColor: colors.accent.primary,
+  },
+  distToggleText: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+  },
+  distToggleTextActive: {
+    color: colors.accent.primary,
+  },
   distributionCard: {
     backgroundColor: colors.bg.card,
     borderRadius: radius.lg,
@@ -492,10 +678,17 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   distMuscle: {
-    width: 80,
     fontSize: font.sm,
     fontWeight: '600',
     color: colors.text.primary,
+  },
+  distMuscleWarning: {
+    color: '#F97316',
+  },
+  distHint: {
+    fontSize: 10,
+    color: colors.text.tertiary,
+    marginTop: 1,
   },
   distBarBg: {
     flex: 1,

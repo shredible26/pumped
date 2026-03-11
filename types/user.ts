@@ -27,4 +27,10 @@ export interface Profile {
   /** Daily AI generation credits (optional until migration applied) */
   generation_credits_remaining?: number | null;
   credits_reset_date?: string | null;
+  /** Profile tab (009) */
+  avatar_url?: string | null;
+  manual_squat_1rm?: number | null;
+  manual_bench_1rm?: number | null;
+  manual_deadlift_1rm?: number | null;
+  units?: 'lbs' | 'kg' | null;
 }

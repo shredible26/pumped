@@ -8,11 +8,12 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
-import { parseLocalDate } from '@/utils/date';
+import { parseLocalDate, getLocalDateString } from '@/utils/date';
+import { formatVolumeCompact, type Units } from '@/utils/units';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
 
@@ -41,10 +42,14 @@ interface SavedWorkout {
 export default function WorkoutsScreen() {
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
+  const units: Units = (profile as { units?: Units })?.units ?? 'lbs';
 
   const [pastWorkouts, setPastWorkouts] = useState<PastWorkoutRow[]>([]);
   const [savedWorkouts, setSavedWorkouts] = useState<SavedWorkout[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  type PastFilter = 'today' | 'week' | 'month' | 'all';
+  const [pastFilter, setPastFilter] = useState<PastFilter>('today');
 
   const fetchData = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -85,11 +90,32 @@ export default function WorkoutsScreen() {
     fetchData();
   }, [fetchData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchData();
     setRefreshing(false);
   }, [fetchData]);
+
+  const todayStr = getLocalDateString();
+  const now = new Date();
+  const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+  const monthStart = startOfMonth(now);
+  const monthEnd = endOfMonth(now);
+
+  const filteredPastWorkouts = pastWorkouts.filter((w) => {
+    const d = parseLocalDate(w.date);
+    if (pastFilter === 'today') return w.date === todayStr;
+    if (pastFilter === 'week') return isWithinInterval(d, { start: weekStart, end: weekEnd });
+    if (pastFilter === 'month') return isWithinInterval(d, { start: monthStart, end: monthEnd });
+    return true;
+  });
 
   const deleteSaved = async (id: string) => {
     await supabase.from('saved_workouts').delete().eq('id', id);
@@ -110,8 +136,21 @@ export default function WorkoutsScreen() {
       >
         <Text style={styles.title}>Workouts</Text>
 
-        {/* Past Workouts — only logged workouts (no rest days), indexed by date, 5 visible at a time */}
+        {/* Past Workouts — filter by Today / This Week / This Month / All */}
         <Text style={styles.sectionHeader}>Past Workouts</Text>
+        <View style={styles.filterRow}>
+          {(['today', 'week', 'month', 'all'] as const).map((f) => (
+            <Pressable
+              key={f}
+              style={[styles.filterPill, pastFilter === f && styles.filterPillActive]}
+              onPress={() => setPastFilter(f)}
+            >
+              <Text style={[styles.filterPillText, pastFilter === f && styles.filterPillTextActive]}>
+                {f === 'today' ? 'Today' : f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : 'All'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
 
         {pastWorkouts.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -121,8 +160,16 @@ export default function WorkoutsScreen() {
               Complete your first workout to see it here.
             </Text>
           </View>
+        ) : filteredPastWorkouts.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="calendar-outline" size={28} color={colors.text.tertiary} />
+            <Text style={styles.emptyText}>No workouts in this range</Text>
+            <Text style={styles.emptySubtext}>
+              {pastFilter === 'today' ? "You haven't logged a workout today." : `No workouts in this ${pastFilter}.`}
+            </Text>
+          </View>
         ) : (
-          pastWorkouts.map((w) => (
+          filteredPastWorkouts.map((w) => (
             <Pressable
               key={w.id}
               style={styles.workoutCard}
@@ -150,8 +197,8 @@ export default function WorkoutsScreen() {
                     {w.duration_seconds
                       ? ` · ${Math.round(w.duration_seconds / 60)} min`
                       : ''}
-                    {w.total_volume
-                      ? ` · ${Number(w.total_volume).toLocaleString()} lbs`
+                    {w.total_volume != null && Number(w.total_volume) > 0
+                      ? ` · ${formatVolumeCompact(Number(w.total_volume), units)}`
                       : ''}
                   </Text>
                 </View>
@@ -275,6 +322,32 @@ const styles = StyleSheet.create({
   seeAll: {
     fontSize: font.sm,
     fontWeight: '600',
+    color: colors.accent.primary,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  filterPill: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  filterPillActive: {
+    backgroundColor: colors.accent.bg,
+    borderColor: colors.accent.primary,
+  },
+  filterPillText: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  filterPillTextActive: {
     color: colors.accent.primary,
   },
   emptyCard: {
