@@ -15,14 +15,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
 import { colors, font, spacing, radius } from '@/utils/theme';
+import { PROGRAM_STYLES } from '@/utils/constants';
 
-const PROGRAM_OPTIONS = [
-  { key: 'ppl', label: 'Push/Pull/Legs' },
-  { key: 'upper_lower', label: 'Upper/Lower' },
-  { key: 'bro_split', label: 'Bro Split' },
-  { key: 'full_body', label: 'Full Body' },
-  { key: 'ai_optimal', label: 'AI Optimal' },
-];
+const PROGRAM_OPTIONS = PROGRAM_STYLES.map((p) => ({
+  key: p.id,
+  label: p.label,
+  subtitle: p.description,
+}));
 
 const DAYS_OPTIONS = [2, 3, 4, 5, 6];
 
@@ -224,14 +223,19 @@ export default function ProfileScreen() {
                   ]}
                   onPress={() => updateField('program_style', opt.key)}
                 >
-                  <Text
-                    style={[
-                      styles.modalOptionText,
-                      profile?.program_style === opt.key && styles.modalOptionTextActive,
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.modalOptionText,
+                        profile?.program_style === opt.key && styles.modalOptionTextActive,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    {'subtitle' in opt && opt.subtitle && (
+                      <Text style={styles.modalOptionSubtitle}>{opt.subtitle}</Text>
+                    )}
+                  </View>
                   {profile?.program_style === opt.key && (
                     <Ionicons name="checkmark" size={18} color={colors.accent.primary} />
                   )}
@@ -482,6 +486,11 @@ const styles = StyleSheet.create({
   },
   modalOptionTextActive: {
     color: colors.accent.primary,
+  },
+  modalOptionSubtitle: {
+    fontSize: font.xs,
+    color: colors.text.tertiary,
+    marginTop: 2,
     fontWeight: '600',
   },
   daysPillRow: {

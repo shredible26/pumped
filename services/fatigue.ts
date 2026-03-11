@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { MuscleFatigue } from '@/types/workout';
 import { MUSCLE_GROUPS } from '@/utils/constants';
+import { calculateRecovery } from '@/utils/recoveryModel';
 
 export async function fetchFatigueMap(userId: string): Promise<MuscleFatigue[]> {
   const { data, error } = await supabase
@@ -111,4 +112,124 @@ export async function updateMuscleFatigue(
   await applyWorkoutFatigue(userId, [
     { primary_muscle: muscle, volume: volumeLoad },
   ]);
+}
+
+export interface HistoricalFatigueEntry {
+  muscle_group: string;
+  recovery_pct: number | null;
+  last_trained_at: string | null;
+  volume_load: number;
+}
+
+/**
+ * Compute muscle fatigue map as of a given date from workout history.
+ * Used when user selects a past day on the Today screen.
+ */
+export async function getHistoricalFatigueMap(
+  userId: string,
+  asOfDate: Date,
+): Promise<HistoricalFatigueEntry[]> {
+  const asOfStr = asOfDate.toISOString().split('T')[0];
+
+  const { data: sessions } = await supabase
+    .from('workout_sessions')
+    .select('id, date, is_rest_day, is_cardio')
+    .eq('user_id', userId)
+    .eq('completed', true)
+    .lte('date', asOfStr)
+    .order('date', { ascending: true });
+
+  const trainingSessions = (sessions || []).filter(
+    (s: any) => !s.is_rest_day && !s.is_cardio,
+  );
+
+  if (trainingSessions.length === 0) {
+    return MUSCLE_GROUPS.map((m) => ({
+      muscle_group: m,
+      recovery_pct: null,
+      last_trained_at: null,
+      volume_load: 0,
+    }));
+  }
+
+  type MuscleState = { last_trained_at: Date; volume_load: number };
+  const state = new Map<string, MuscleState>();
+
+  for (const session of trainingSessions) {
+    const { data: sets } = await supabase
+      .from('set_logs')
+      .select('exercise_id, actual_weight, actual_reps')
+      .eq('session_id', session.id);
+
+    if (!sets || sets.length === 0) continue;
+
+    const exerciseIds = [...new Set(sets.map((s: any) => s.exercise_id).filter(Boolean))];
+    if (exerciseIds.length === 0) continue;
+
+    const { data: exercises } = await supabase
+      .from('exercises')
+      .select('id, primary_muscle, secondary_muscles')
+      .in('id', exerciseIds);
+
+    const exMap = new Map((exercises || []).map((e: any) => [e.id, e]));
+    const byMuscle = new Map<string, { primaryVol: number; secondaryVol: number; primaryCount: number }>();
+
+    for (const set of sets) {
+      const w = Number(set.actual_weight) || 0;
+      const r = Number(set.actual_reps) || 0;
+      const vol = w * r;
+      if (vol <= 0) continue;
+      const ex = exMap.get(set.exercise_id);
+      const primary = ex?.primary_muscle;
+      const secondaries = (ex?.secondary_muscles as string[]) || [];
+
+      if (primary) {
+        const a = byMuscle.get(primary) ?? { primaryVol: 0, secondaryVol: 0, primaryCount: 0 };
+        a.primaryVol += vol;
+        a.primaryCount += 1;
+        byMuscle.set(primary, a);
+      }
+      for (const m of secondaries) {
+        if (!m || m === primary) continue;
+        const a = byMuscle.get(m) ?? { primaryVol: 0, secondaryVol: 0, primaryCount: 0 };
+        a.secondaryVol += vol * 0.5;
+        byMuscle.set(m, a);
+      }
+    }
+
+    const sessionDate = new Date(session.date + 'T12:00:00Z');
+    for (const [muscle, agg] of byMuscle) {
+      let effectiveLoad = agg.primaryVol + agg.secondaryVol;
+      if (agg.primaryCount >= 3) effectiveLoad *= 2.8;
+      else if (agg.primaryCount >= 1) effectiveLoad *= 1.35;
+      else effectiveLoad *= 0.45;
+      if (effectiveLoad < 1) continue;
+      state.set(muscle, {
+        last_trained_at: sessionDate,
+        volume_load: Math.round(effectiveLoad * 10) / 10,
+      });
+    }
+  }
+
+  const asOfEndOfDay = new Date(asOfDate);
+  asOfEndOfDay.setHours(23, 59, 59, 999);
+
+  return MUSCLE_GROUPS.map((muscle_group) => {
+    const s = state.get(muscle_group);
+    if (!s) {
+      return { muscle_group, recovery_pct: null, last_trained_at: null, volume_load: 0 };
+    }
+    const recovery_pct = calculateRecovery(
+      muscle_group,
+      s.last_trained_at,
+      s.volume_load,
+      asOfEndOfDay,
+    );
+    return {
+      muscle_group,
+      recovery_pct,
+      last_trained_at: s.last_trained_at.toISOString(),
+      volume_load: s.volume_load,
+    };
+  });
 }

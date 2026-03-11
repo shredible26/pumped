@@ -79,8 +79,6 @@ Deno.serve(async (req) => {
     const programRotations: Record<string, string[]> = {
       ppl: ["push", "pull", "legs", "push", "pull", "legs", "rest"],
       upper_lower: ["upper", "lower", "rest", "upper", "lower", "rest", "rest"],
-      bro_split: ["chest_triceps", "back_biceps", "shoulders", "legs", "arms", "rest", "rest"],
-      full_body: ["full_body", "rest", "full_body", "rest", "full_body", "rest", "rest"],
       aesthetic: [],
       ai_optimal: [],
     };
@@ -98,6 +96,15 @@ FATIGUE RULES (recovery % from fatigueMap: null/gray = no data yet — treat as 
 4. No data (null): Treat as fully available (new user assumption).
 5. Adjust sets/reps/weight by fatigue: fatigued muscles → fewer sets (2-3), higher reps (12-15), lighter weight. Recovered muscles → normal programming per user goals.
 6. If ALL muscles are fatigued but the user still wants to train, generate a light recovery workout only; in EACH exercise's "why", state that recovery is the priority.
+
+DURATION CALCULATION: Estimate workout duration using this formula:
+- Each SET takes approximately 30-45 seconds to perform
+- Rest between sets: 2 minutes for compound exercises, 90 seconds for isolation exercises
+- Add 1 minute transition time between different exercises
+- Example: An exercise with 3 sets and 2-minute rest = 3 × 0.5min (lifting) + 2 × 2min (rest) + 1min (transition) = ~6.5 minutes
+- If the user requests a time limit (e.g., '30 minutes'), work backwards: 30 min ÷ ~6.5 min per exercise ≈ 4-5 exercises with 3 sets each, or fewer exercises with more sets
+- Always respect time constraints from user modifications
+- The estimated_minutes field MUST be accurate based on this calculation, not a guess
 
 ALWAYS include at the top level:
 - "description": string, 2-3 sentences explaining WHY this workout was chosen: which muscles are recovered and targeted, which are avoided or given reduced volume, and how this fits the program.

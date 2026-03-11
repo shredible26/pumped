@@ -43,6 +43,17 @@ export async function fetchSessions(
   return data as WorkoutSession[];
 }
 
+export async function fetchSessionById(sessionId: string): Promise<WorkoutSession | null> {
+  const { data, error } = await supabase
+    .from('workout_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as WorkoutSession | null;
+}
+
 export async function fetchSessionSets(sessionId: string): Promise<SetLog[]> {
   const { data, error } = await supabase
     .from('set_logs')

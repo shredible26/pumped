@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,8 +9,9 @@ import { supabase } from '@/services/supabase';
 
 export default function SpeedLogSaveScreen() {
   const router = useRouter();
-  const { type, exerciseNames, exerciseSets } = useLocalSearchParams<{
+  const { type, workoutName: paramWorkoutName, exerciseNames, exerciseSets } = useLocalSearchParams<{
     type: string;
+    workoutName?: string;
     exerciseNames: string;
     exerciseSets: string;
   }>();
@@ -18,7 +19,7 @@ export default function SpeedLogSaveScreen() {
 
   const names = exerciseNames?.split('|') ?? [];
   const sets = exerciseSets?.split('|') ?? [];
-  const [workoutName, setWorkoutName] = useState(`My ${type} Day`);
+  const workoutName = paramWorkoutName ?? `My ${type} Day`;
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -58,6 +59,7 @@ export default function SpeedLogSaveScreen() {
         <Text style={styles.subtitle}>
           Reuse it next time you train {type}
         </Text>
+        <Text style={styles.workoutNameDisplay}>{workoutName}</Text>
 
         <View style={styles.exerciseList}>
           {names.map((name, i) => (
@@ -72,14 +74,6 @@ export default function SpeedLogSaveScreen() {
             </View>
           ))}
         </View>
-
-        <TextInput
-          style={styles.nameInput}
-          placeholder={`Name this workout (e.g., My ${type} Day)`}
-          placeholderTextColor={colors.text.tertiary}
-          value={workoutName}
-          onChangeText={setWorkoutName}
-        />
 
         <Pressable
           style={[styles.saveButton, saving && { opacity: 0.6 }]}
@@ -128,6 +122,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     textAlign: 'center',
   },
+  workoutNameDisplay: {
+    fontSize: font.md,
+    fontWeight: '600',
+    color: colors.accent.primary,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
   exerciseList: {
     width: '100%',
     backgroundColor: colors.bg.card,
@@ -152,18 +153,6 @@ const styles = StyleSheet.create({
   exerciseSets: {
     fontSize: font.sm,
     color: colors.text.secondary,
-  },
-  nameInput: {
-    width: '100%',
-    backgroundColor: colors.bg.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
-    fontSize: font.md,
-    color: colors.text.primary,
-    marginTop: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border.default,
   },
   saveButton: {
     flexDirection: 'row',

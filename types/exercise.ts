@@ -8,7 +8,8 @@ export type MovementPattern =
   | 'lunge'
   | 'isolation_push'
   | 'isolation_pull'
-  | 'core';
+  | 'core'
+  | 'cardio';
 
 export type Equipment =
   | 'barbell'
@@ -16,7 +17,8 @@ export type Equipment =
   | 'cable'
   | 'machine'
   | 'bodyweight'
-  | 'kettlebell';
+  | 'kettlebell'
+  | 'cardio_machine';
 
 export type Difficulty = 'beginner' | 'intermediate' | 'advanced';
 

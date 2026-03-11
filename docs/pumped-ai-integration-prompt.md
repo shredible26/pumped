@@ -45,12 +45,11 @@ Deno.serve(async (req) => {
   try {
     const { profile, fatigueMap, recentHistory, exercises, modifications } = await req.json();
 
-    // Determine today's workout type based on program rotation
+    // Determine today's workout type based on program rotation (only 4 styles: ppl, upper_lower, aesthetic, ai_optimal)
     const programRotations: Record<string, string[]> = {
       ppl: ["push", "pull", "legs", "push", "pull", "legs", "rest"],
       upper_lower: ["upper", "lower", "rest", "upper", "lower", "rest", "rest"],
-      bro_split: ["chest_triceps", "back_biceps", "shoulders", "legs", "arms", "rest", "rest"],
-      full_body: ["full_body", "rest", "full_body", "rest", "full_body", "rest", "rest"],
+      aesthetic: [],  // AI decides
       ai_optimal: [], // AI decides
     };
 
@@ -480,3 +479,11 @@ Build in this exact order, testing after each step:
 10. Test the full flow end-to-end: generate → preview → log → save
 
 After each step, make sure the app compiles and runs. Do NOT proceed to the next step if there are errors.
+
+---
+
+## INTEGRATION NOTES (March 2026 — Agent Handoff)
+
+- **Program styles**: Only four are supported: `ppl`, `upper_lower`, `aesthetic`, `ai_optimal`. No Bro Split or Full Body. See `docs/pumped-technical-spec-v2.md` and migration `008_program_style_four_only.sql`.
+- **Session date when saving**: When the client creates a `workout_session` (after logging a workout), the `date` field must be the user's **local calendar date** (e.g. via `getLocalDateString()` from `utils/date.ts`), not UTC. This avoids workouts appearing on the wrong day in Past Workouts and on the calendar. See technical spec §Implementation Status.
+- **Redeploy edge function** after changing the system prompt: `supabase functions deploy generate-workout --no-verify-jwt`

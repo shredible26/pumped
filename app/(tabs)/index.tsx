@@ -8,51 +8,47 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   format,
   startOfWeek,
+  startOfDay,
   addDays,
   isSameDay,
   isToday,
+  isAfter,
 } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useFatigue } from '@/hooks/useFatigue';
 import { supabase } from '@/services/supabase';
 import { getTodaysPlan } from '@/services/ai';
+import { updateProfileStreak } from '@/services/streak';
+import { createSession } from '@/services/workouts';
+import { getHistoricalFatigueMap } from '@/services/fatigue';
 import { Profile } from '@/types/user';
 import BodyMap from '@/components/home/BodyMap';
 import MuscleDetailSheet from '@/components/home/MuscleDetailSheet';
+import RoutineTimeline from '@/components/home/RoutineTimeline';
 import type { GeneratedWorkout } from '@/services/ai';
+import { getWorkoutTypeForDate } from '@/utils/schedule';
 
 const PROGRAM_LABELS: Record<string, string> = {
   ppl: 'Push/Pull/Legs',
   upper_lower: 'Upper/Lower',
-  bro_split: 'Bro Split',
-  full_body: 'Full Body',
   aesthetic: 'Aesthetic',
   ai_optimal: 'AI Optimal',
 };
 
-const PPL_ROTATION = ['Push', 'Pull', 'Legs', 'Push', 'Pull', 'Legs', 'Rest'];
-const UL_ROTATION = ['Upper', 'Lower', 'Rest', 'Upper', 'Lower', 'Rest', 'Rest'];
-const BRO_ROTATION = ['Chest/Tris', 'Back/Bis', 'Shoulders', 'Legs', 'Arms', 'Rest', 'Rest'];
-const FB_ROTATION = ['Full Body', 'Rest', 'Full Body', 'Rest', 'Full Body', 'Rest', 'Rest'];
-
-function getTodayWorkoutType(programStyle: string | undefined): string {
-  const dayOfWeek = new Date().getDay();
-  switch (programStyle) {
-    case 'ppl': return PPL_ROTATION[dayOfWeek] ?? 'Push';
-    case 'upper_lower': return UL_ROTATION[dayOfWeek] ?? 'Upper';
-    case 'bro_split': return BRO_ROTATION[dayOfWeek] ?? 'Chest/Tris';
-    case 'full_body': return FB_ROTATION[dayOfWeek] ?? 'Full Body';
-    case 'aesthetic': return 'AI Workout';
-    case 'ai_optimal': return 'AI Workout';
-    default: return 'Workout';
-  }
+function getTodayWorkoutType(
+  programStyle: string | undefined,
+  trainingFrequency: number
+): string {
+  return getWorkoutTypeForDate(programStyle, new Date(), trainingFrequency);
 }
+
+type SessionForDate = { id: string; name: string; date: string; completed_at?: string; is_rest_day?: boolean };
 
 export default function TodayScreen() {
   const router = useRouter();
@@ -61,11 +57,18 @@ export default function TodayScreen() {
   const setProfile = useAuthStore((s) => s.setProfile);
 
   const { fatigueMap, refreshFatigue } = useFatigue();
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [workoutDaysThisWeek, setWorkoutDaysThisWeek] = useState<string[]>([]);
+  const [restDaysThisWeek, setRestDaysThisWeek] = useState<string[]>([]);
+  /** Dates (yyyy-MM-dd) this week where user logged a workout, rest day, or cardio */
+  const [activityDaysThisWeek, setActivityDaysThisWeek] = useState<string[]>([]);
   const [cachedPlan, setCachedPlan] = useState<GeneratedWorkout | null>(null);
+  const [sessionsForSelectedDate, setSessionsForSelectedDate] = useState<SessionForDate[]>([]);
+  const [loggingRestDay, setLoggingRestDay] = useState(false);
+  const [historicalFatigueMap, setHistoricalFatigueMap] = useState<Array<{ muscle_group: string; recovery_pct: number | null; last_trained_at: string | null }>>([]);
 
   const fetchProfile = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -81,16 +84,39 @@ export default function TodayScreen() {
     if (!session?.user?.id) return;
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
     const weekEnd = addDays(weekStart, 6);
-    const { data } = await supabase
+    const from = format(weekStart, 'yyyy-MM-dd');
+    const to = format(weekEnd, 'yyyy-MM-dd');
+    const { data: workoutData } = await supabase
       .from('workout_sessions')
       .select('date')
       .eq('user_id', session.user.id)
       .eq('completed', true)
-      .gte('date', format(weekStart, 'yyyy-MM-dd'))
-      .lte('date', format(weekEnd, 'yyyy-MM-dd'));
-    if (data) {
-      setWorkoutDaysThisWeek(data.map((d: any) => d.date));
-    }
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .gte('date', from)
+      .lte('date', to);
+    const { data: restData } = await supabase
+      .from('workout_sessions')
+      .select('date')
+      .eq('user_id', session.user.id)
+      .eq('is_rest_day', true)
+      .gte('date', from)
+      .lte('date', to);
+    const { data: cardioData } = await supabase
+      .from('workout_sessions')
+      .select('date')
+      .eq('user_id', session.user.id)
+      .eq('completed', true)
+      .eq('is_cardio', true)
+      .gte('date', from)
+      .lte('date', to);
+    if (workoutData) setWorkoutDaysThisWeek([...new Set(workoutData.map((d: any) => d.date))]);
+    if (restData) setRestDaysThisWeek([...new Set(restData.map((d: any) => d.date))]);
+    const allActivityDates = new Set<string>([
+      ...(workoutData ?? []).map((d: any) => d.date),
+      ...(restData ?? []).map((d: any) => d.date),
+      ...(cardioData ?? []).map((d: any) => d.date),
+    ]);
+    setActivityDaysThisWeek([...allActivityDates]);
   }, [session?.user?.id]);
 
   const fetchCachedPlan = useCallback(async () => {
@@ -99,6 +125,31 @@ export default function TodayScreen() {
     setCachedPlan(plan);
   }, [session?.user?.id]);
 
+  const fetchSessionsForDate = useCallback(
+    async (date: Date) => {
+      if (!session?.user?.id) return;
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const { data } = await supabase
+        .from('workout_sessions')
+        .select('id, name, date, completed_at, is_rest_day')
+        .eq('user_id', session.user.id)
+        .eq('date', dateStr)
+        .eq('completed', true)
+        .order('completed_at', { ascending: true });
+      const rows = (data ?? []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        date: r.date,
+        completed_at: r.completed_at,
+        is_rest_day: r.is_rest_day,
+      }));
+      const hasWorkout = rows.some((r: SessionForDate) => !r.is_rest_day);
+      const toShow = hasWorkout ? rows.filter((r: SessionForDate) => !r.is_rest_day) : rows;
+      setSessionsForSelectedDate(toShow);
+    },
+    [session?.user?.id]
+  );
+
   const loadData = useCallback(async () => {
     await Promise.all([
       fetchProfile(),
@@ -106,11 +157,47 @@ export default function TodayScreen() {
       fetchWeekWorkouts(),
       fetchCachedPlan(),
     ]);
-  }, [fetchProfile, refreshFatigue, fetchWeekWorkouts, fetchCachedPlan]);
+    if (session?.user?.id) {
+      try {
+        const streakResult = await updateProfileStreak(session.user.id);
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        if (profileData) setProfile({ ...profileData, ...streakResult } as Profile);
+      } catch {}
+    }
+  }, [fetchProfile, refreshFatigue, fetchWeekWorkouts, fetchCachedPlan, session?.user?.id]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    fetchSessionsForDate(selectedDate);
+  }, [selectedDate, fetchSessionsForDate]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchSessionsForDate(selectedDate);
+      fetchWeekWorkouts();
+      refreshFatigue();
+    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, refreshFatigue])
+  );
+
+  useEffect(() => {
+    const isFuture = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
+    if (!session?.user?.id || isSameDay(selectedDate, new Date()) || isFuture) {
+      setHistoricalFatigueMap([]);
+      return;
+    }
+    let cancelled = false;
+    getHistoricalFatigueMap(session.user.id, selectedDate).then((data) => {
+      if (!cancelled) setHistoricalFatigueMap(data);
+    });
+    return () => { cancelled = true; };
+  }, [selectedDate, session?.user?.id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -123,11 +210,48 @@ export default function TodayScreen() {
     setSheetVisible(true);
   }, []);
 
+  const handleLogRestDay = useCallback(async () => {
+    if (!session?.user?.id) return;
+    setLoggingRestDay(true);
+    try {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      await createSession({
+        user_id: session.user.id,
+        date: today,
+        name: 'Rest Day',
+        completed: true,
+        is_rest_day: true,
+        workout_type: null,
+        source: 'custom',
+        exercise_count: 0,
+        set_count: 0,
+        total_volume: 0,
+        pr_count: 0,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      });
+      const streakResult = await updateProfileStreak(session.user.id);
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+      if (profileData) setProfile({ ...profileData, ...streakResult } as Profile);
+      await fetchWeekWorkouts();
+    } catch {}
+    setLoggingRestDay(false);
+  }, [session?.user?.id, setProfile, fetchWeekWorkouts]);
+
   const streak = profile?.current_streak_days ?? 0;
   const totalWorkouts = profile?.total_workouts ?? 0;
-  const trainingFreq = profile?.training_frequency ?? 0;
+  const trainingFreq = profile?.training_frequency ?? 4;
   const firstName = profile?.display_name?.split(' ')[0] ?? 'there';
-  const todayType = getTodayWorkoutType(profile?.program_style);
+  const todayType = getTodayWorkoutType(profile?.program_style, trainingFreq);
+  const selectedDateType = getWorkoutTypeForDate(
+    profile?.program_style,
+    selectedDate,
+    trainingFreq
+  );
   const isRestDay = todayType === 'Rest';
   const programLabel = profile?.program_style
     ? PROGRAM_LABELS[profile.program_style] ?? ''
@@ -137,6 +261,8 @@ export default function TodayScreen() {
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   const weekWorkoutCount = workoutDaysThisWeek.length;
+  const isSelectedToday = isSameDay(selectedDate, new Date());
+  const isSelectedFuture = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -150,22 +276,28 @@ export default function TodayScreen() {
           />
         }
       >
-        {/* Weekly Calendar Strip */}
+        {/* Weekly Calendar Strip — tappable for all days (today, past, future) */}
         <View style={styles.calendarStrip}>
           {weekDays.map((day) => {
             const today = isToday(day);
-            const hasWorkout = workoutDaysThisWeek.includes(
-              format(day, 'yyyy-MM-dd'),
-            );
+            const selected = isSameDay(day, selectedDate);
+            const dateStr = format(day, 'yyyy-MM-dd');
+            const isFutureDay = isAfter(startOfDay(day), startOfDay(new Date()));
+            const hasActivity = activityDaysThisWeek.includes(dateStr);
             return (
-              <View
+              <Pressable
                 key={day.toISOString()}
-                style={[styles.calendarDay, today && styles.calendarDayToday]}
+                onPress={() => setSelectedDate(day)}
+                style={[
+                  styles.calendarDay,
+                  today && styles.calendarDayToday,
+                  selected && styles.calendarDaySelected,
+                ]}
               >
                 <Text
                   style={[
                     styles.calendarDayLabel,
-                    today && styles.calendarDayLabelToday,
+                    (today || selected) && styles.calendarDayLabelToday,
                   ]}
                 >
                   {format(day, 'EEE').toUpperCase()}
@@ -173,48 +305,117 @@ export default function TodayScreen() {
                 <Text
                   style={[
                     styles.calendarDate,
-                    today && styles.calendarDateToday,
+                    (today || selected) && styles.calendarDateToday,
                   ]}
                 >
                   {format(day, 'd')}
                 </Text>
-                {hasWorkout && <View style={styles.calendarDot} />}
-              </View>
+                {hasActivity && !isFutureDay && <View style={styles.calendarDot} />}
+              </Pressable>
             );
           })}
         </View>
 
         {/* Welcome Message */}
         <View style={styles.welcomeSection}>
-          <Text style={styles.welcomeText}>Welcome, {firstName}</Text>
+          <Text style={styles.welcomeText}>
+            {format(selectedDate, 'EEEE, MMM d')}
+          </Text>
           <Text style={styles.welcomeSubtext}>
-            {isRestDay
-              ? 'Rest day — recover and grow'
-              : `${todayType} day scheduled`}
+            {isSelectedFuture
+              ? 'Scheduled'
+              : isSelectedToday
+                ? isRestDay
+                  ? 'Rest day — recover and grow'
+                  : `${todayType} day scheduled`
+                : sessionsForSelectedDate.length > 0
+                  ? sessionsForSelectedDate.length === 1
+                    ? 'Workout completed'
+                    : `${sessionsForSelectedDate.length} workouts completed`
+                  : selectedDateType === 'Rest'
+                    ? 'Rest day'
+                    : 'No workout logged'}
           </Text>
         </View>
 
-        {/* Today's Workout Card */}
-        {!isRestDay && (
+        {/* Future day: only scheduled workout name, no actions */}
+        {isSelectedFuture && (
           <View style={styles.workoutCard}>
             <View style={styles.workoutCardHeader}>
               <View style={styles.scheduledBadge}>
                 <Text style={styles.scheduledBadgeText}>SCHEDULED</Text>
               </View>
-              {cachedPlan ? (
-                <View style={styles.generatedBadge}>
-                  <Text style={styles.generatedBadgeText}>Generated</Text>
-                </View>
-              ) : null}
               <View style={styles.workoutIconBox}>
-                <Ionicons name="barbell" size={18} color={colors.accent.primary} />
+                <Ionicons name="calendar-outline" size={18} color={colors.text.tertiary} />
+              </View>
+            </View>
+            <Text style={styles.workoutType}>
+              {selectedDateType === 'Rest' ? 'Active Recovery Day' : selectedDateType}
+            </Text>
+            <Text style={styles.programName}>
+              {format(selectedDate, 'MMM d, yyyy')} · Based on your program
+            </Text>
+          </View>
+        )}
+
+        {/* Today + workout(s) already logged: show list of sessions (like past day), no AI card */}
+        {isSelectedToday && !isRestDay && sessionsForSelectedDate.length > 0 && (
+          <View style={styles.pastSessionsContainer}>
+            <Pressable
+              style={styles.speedLogButtonStandalone}
+              onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
+            >
+              <Ionicons name="flash" size={18} color={colors.text.primary} />
+              <Text style={styles.speedLogButtonText}>Speed Log</Text>
+            </Pressable>
+            {sessionsForSelectedDate.map((sess) => (
+              <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
+                <View style={styles.workoutCardHeader}>
+                  <View style={styles.workoutIconBox}>
+                    <Ionicons name="barbell" size={18} color={colors.accent.primary} />
+                  </View>
+                </View>
+                <Text style={styles.workoutType}>{sess.name}</Text>
+                <Text style={styles.programName}>
+                  {format(selectedDate, 'MMM d, yyyy')}
+                  {sess.completed_at
+                    ? ` · ${format(new Date(sess.completed_at), 'h:mm a')}`
+                    : ''}
+                </Text>
+                <Pressable
+                  style={styles.startButton}
+                  onPress={() => router.push(`/history/${sess.id}`)}
+                >
+                  <Ionicons name="open-outline" size={18} color={colors.text.inverse} />
+                  <Text style={styles.startButtonText}>View Workout</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Today + no workouts logged yet: AI card + Speed Log */}
+        {isSelectedToday && !isRestDay && sessionsForSelectedDate.length === 0 && (
+          <View style={styles.workoutCard}>
+            <View style={styles.workoutCardHeader}>
+              <View style={styles.scheduledBadge}>
+                <Text style={styles.scheduledBadgeText}>SCHEDULED</Text>
+              </View>
+              <View style={styles.workoutIconBox}>
+                <Ionicons
+                  name={cachedPlan ? 'barbell' : 'sparkles'}
+                  size={18}
+                  color={colors.accent.primary}
+                />
               </View>
             </View>
 
-            <Text style={styles.workoutType}>{todayType}</Text>
+            <Text style={styles.workoutType}>
+              {cachedPlan ? cachedPlan.name : 'Generate Today\'s Workout'}
+            </Text>
             <View style={styles.programRow}>
               <Text style={styles.programName}>
-                {programLabel ? `${programLabel} · AI Enhanced` : 'AI Enhanced'}
+                {programLabel ? `${programLabel} · AI Enhanced` : 'AI Optimal'}
               </Text>
               <Ionicons
                 name="chevron-down"
@@ -245,7 +446,7 @@ export default function TodayScreen() {
 
             <Pressable
               style={styles.speedLogButton}
-              onPress={() => router.push('/speedlog')}
+              onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
             >
               <Ionicons
                 name="flash"
@@ -257,60 +458,162 @@ export default function TodayScreen() {
           </View>
         )}
 
-        {isRestDay && (
+        {isSelectedToday && isRestDay && (
           <View style={styles.restCard}>
-            <Text style={styles.restEmoji}>🧘</Text>
-            <Text style={styles.restTitle}>Rest Day</Text>
+            <Text style={styles.restEmoji}>🏃</Text>
+            <Text style={styles.restTitle}>Active Recovery</Text>
             <Text style={styles.restSubtext}>
-              Want to train anyway? Generate a light recovery workout.
+              30 min light cardio recommended — e.g. incline walk or bike. Keeps blood flowing without adding fatigue.
             </Text>
+            <View style={styles.restButtonColumn}>
+              <Pressable
+                style={[styles.restDayButton, styles.restDayButtonFirst]}
+                onPress={() => router.push('/workout/modifications')}
+              >
+                <Ionicons name="sparkles" size={18} color={colors.text.inverse} />
+                <Text style={styles.startButtonText}>Customize Cardio</Text>
+              </Pressable>
+              <Pressable
+                style={styles.restDayButton}
+                onPress={() => void handleLogRestDay()}
+                disabled={loggingRestDay}
+              >
+                <Ionicons name="body-outline" size={18} color={colors.text.inverse} />
+                <Text style={styles.startButtonText}>
+                  {loggingRestDay ? 'Logging…' : 'Log Rest Day'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.restDayButton}
+                onPress={() => router.push('/cardio/log')}
+              >
+                <Ionicons name="bicycle" size={18} color={colors.text.inverse} />
+                <Text style={styles.startButtonText}>Log Cardio</Text>
+              </Pressable>
+              <Pressable
+                style={styles.restDayButton}
+                onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
+              >
+                <Ionicons name="flash" size={18} color={colors.text.inverse} />
+                <Text style={styles.startButtonText}>Speed Log</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {!isSelectedToday && !isSelectedFuture && sessionsForSelectedDate.length > 0 && (
+          <View style={styles.pastSessionsContainer}>
             <Pressable
-              style={styles.startButton}
-              onPress={() => router.push('/workout/modifications')}
-            >
-              <Ionicons name="sparkles" size={18} color={colors.text.inverse} />
-              <Text style={styles.startButtonText}>Generate Workout</Text>
-            </Pressable>
-            <Pressable
-              style={styles.speedLogButton}
-              onPress={() => router.push('/speedlog')}
+              style={styles.speedLogButtonStandalone}
+              onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
             >
               <Ionicons name="flash" size={18} color={colors.text.primary} />
               <Text style={styles.speedLogButtonText}>Speed Log</Text>
             </Pressable>
+            {sessionsForSelectedDate.map((sess) => (
+              <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
+                <View style={styles.workoutCardHeader}>
+                  <View style={styles.workoutIconBox}>
+                    <Ionicons name="barbell" size={18} color={colors.accent.primary} />
+                  </View>
+                </View>
+                <Text style={styles.workoutType}>{sess.name}</Text>
+                <Text style={styles.programName}>
+                  {format(selectedDate, 'MMM d, yyyy')}
+                  {sess.completed_at
+                    ? ` · ${format(new Date(sess.completed_at), 'h:mm a')}`
+                    : ''}
+                </Text>
+                <Pressable
+                  style={styles.startButton}
+                  onPress={() => router.push(`/history/${sess.id}`)}
+                >
+                  <Ionicons name="open-outline" size={18} color={colors.text.inverse} />
+                  <Text style={styles.startButtonText}>View Workout</Text>
+                </Pressable>
+              </View>
+            ))}
           </View>
         )}
 
-        {/* Muscle Readiness */}
+        {!isSelectedToday && !isSelectedFuture && sessionsForSelectedDate.length === 0 && (
+          <View style={styles.pastSessionsContainer}>
+            <Pressable
+              style={styles.speedLogButtonStandalone}
+              onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
+            >
+              <Ionicons name="flash" size={18} color={colors.text.primary} />
+              <Text style={styles.speedLogButtonText}>Speed Log</Text>
+            </Pressable>
+            <View style={[styles.workoutCard, styles.workoutCardInList]}>
+              <View style={styles.workoutCardHeader}>
+                <View style={styles.workoutIconBox}>
+                  <Ionicons name="calendar-outline" size={18} color={colors.text.tertiary} />
+                </View>
+              </View>
+              <Text style={styles.workoutType}>No workout logged</Text>
+              <Text style={styles.programName}>
+                {format(selectedDate, 'MMM d, yyyy')}
+              </Text>
+              <Text style={styles.noWorkoutSubtext}>
+                No session was completed on this day.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Muscle Readiness — current when today, historical when past day, empty when future */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardLabel}>MUSCLE READINESS</Text>
+            <Text style={styles.cardLabel}>
+              MUSCLE READINESS
+              {!isSelectedToday
+                ? isSelectedFuture
+                  ? ` · ${format(selectedDate, 'MMM d')} · Future`
+                  : ` · ${format(selectedDate, 'MMM d')}`
+                : ''}
+            </Text>
           </View>
           <BodyMap
-            fatigueMap={fatigueMap}
+            fatigueMap={
+              isSelectedToday
+                ? fatigueMap
+                : isSelectedFuture
+                  ? []
+                  : historicalFatigueMap
+            }
             onSelectMuscle={handleSelectMuscle}
           />
         </View>
 
-        {/* Quick Stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{totalWorkouts}</Text>
-            <Text style={styles.statLabel}>Workouts</Text>
+        {/* Quick Stats — only on current day */}
+        {isSelectedToday && (
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statNumber}>{totalWorkouts}</Text>
+              <Text style={styles.statLabel}>Workouts</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statNumber}>
+                {streak > 0 ? `🔥 ${streak}` : '0'}
+              </Text>
+              <Text style={styles.statLabel}>Streak</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statNumber}>
+                {weekWorkoutCount}/{trainingFreq}
+              </Text>
+              <Text style={styles.statLabel}>This Week</Text>
+            </View>
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>
-              {streak > 0 ? `🔥 ${streak}` : '0'}
-            </Text>
-            <Text style={styles.statLabel}>Streak</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>
-              {weekWorkoutCount}/{trainingFreq}
-            </Text>
-            <Text style={styles.statLabel}>This Week</Text>
-          </View>
-        </View>
+        )}
+
+        {/* This Week's Plan — timeline visible on every day */}
+        <RoutineTimeline
+          programStyle={profile?.program_style}
+          trainingFrequency={trainingFreq}
+          activityDaysThisWeek={activityDaysThisWeek}
+        />
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -318,7 +621,13 @@ export default function TodayScreen() {
       <MuscleDetailSheet
         visible={sheetVisible}
         muscle={selectedMuscle}
-        fatigueMap={fatigueMap}
+        fatigueMap={
+          isSelectedToday
+            ? fatigueMap
+            : isSelectedFuture
+              ? []
+              : historicalFatigueMap
+        }
         onClose={() => setSheetVisible(false)}
       />
     </SafeAreaView>
@@ -345,6 +654,10 @@ const styles = StyleSheet.create({
     minWidth: 42,
   },
   calendarDayToday: {
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+  },
+  calendarDaySelected: {
     backgroundColor: colors.bg.card,
     borderWidth: 1,
     borderColor: colors.accent.border,
@@ -375,7 +688,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent.primary,
     marginTop: 3,
   },
-
   welcomeSection: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
@@ -392,6 +704,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 
+  pastSessionsContainer: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+  },
   workoutCard: {
     backgroundColor: colors.bg.card,
     marginHorizontal: spacing.xl,
@@ -399,6 +715,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border.default,
+  },
+  workoutCardInList: {
+    marginHorizontal: 0,
   },
   workoutCardHeader: {
     flexDirection: 'row',
@@ -419,18 +738,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.accent.primary,
     letterSpacing: 1,
-  },
-  generatedBadge: {
-    backgroundColor: colors.accent.bg,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  generatedBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.accent.primary,
-    letterSpacing: 0.5,
   },
   workoutIconBox: {
     width: 36,
@@ -454,6 +761,11 @@ const styles = StyleSheet.create({
   programName: {
     fontSize: font.sm,
     color: colors.text.tertiary,
+  },
+  noWorkoutSubtext: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
   },
   startButton: {
     flexDirection: 'row',
@@ -479,6 +791,18 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radius.md,
     marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  speedLogButtonStandalone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.primary,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border.light,
   },
@@ -511,6 +835,23 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginTop: spacing.xs,
     textAlign: 'center',
+  },
+  restButtonColumn: {
+    width: '100%',
+    marginTop: spacing.xl,
+  },
+  restDayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent.primary,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
+  },
+  restDayButtonFirst: {
+    marginTop: 0,
   },
 
   card: {

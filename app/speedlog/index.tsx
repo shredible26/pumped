@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
@@ -11,16 +11,17 @@ const MUSCLE_PILLS = [
 
 const PPL_TYPES = ['Push', 'Pull', 'Legs'];
 const UL_TYPES = ['Upper', 'Lower'];
-const BRO_TYPES = ['Chest/Tris', 'Back/Bis', 'Shoulders', 'Legs', 'Arms'];
-const FB_TYPES = ['Full Body'];
 
 function getSplitTypes(style: string | undefined): string[] {
   switch (style) {
-    case 'ppl': return PPL_TYPES;
-    case 'upper_lower': return UL_TYPES;
-    case 'bro_split': return BRO_TYPES;
-    case 'full_body': return FB_TYPES;
-    default: return PPL_TYPES;
+    case 'ppl':
+      return PPL_TYPES;
+    case 'upper_lower':
+      return UL_TYPES;
+    case 'aesthetic':
+    case 'ai_optimal':
+    default:
+      return PPL_TYPES;
   }
 }
 
@@ -32,6 +33,7 @@ function getRecommendedType(style: string | undefined): string {
 
 export default function SpeedLogTypeScreen() {
   const router = useRouter();
+  const { logForDate } = useLocalSearchParams<{ logForDate?: string }>();
   const profile = useAuthStore((s) => s.profile);
   const programStyle = profile?.program_style;
   const recommended = getRecommendedType(programStyle);
@@ -39,7 +41,10 @@ export default function SpeedLogTypeScreen() {
   const otherTypes = allTypes.filter((t) => t !== recommended);
 
   const selectType = (type: string) => {
-    router.push({ pathname: '/speedlog/editor', params: { type } });
+    router.push({
+      pathname: '/speedlog/editor',
+      params: { type, ...(logForDate ? { date: logForDate } : {}) },
+    });
   };
 
   return (

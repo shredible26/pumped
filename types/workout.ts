@@ -25,6 +25,8 @@ export interface WorkoutSession {
   set_count: number;
   pr_count: number;
   completed: boolean;
+  is_rest_day?: boolean;
+  is_cardio?: boolean;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;

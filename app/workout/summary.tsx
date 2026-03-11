@@ -15,6 +15,7 @@ import { useWorkoutStore } from '@/stores/workoutStore';
 import { useAuthStore } from '@/stores/authStore';
 import { completeSession, insertSetLogs } from '@/services/workouts';
 import { applyWorkoutFatigue } from '@/services/fatigue';
+import { updateProfileStreak } from '@/services/streak';
 import { fetchExercises } from '@/services/exercises';
 import { supabase } from '@/services/supabase';
 import { e1rm } from '@/utils/epley';
@@ -231,12 +232,13 @@ export default function WorkoutSummaryScreen() {
       const prevScore = profile?.strength_score ?? 0;
       const newScore = newSquat + newBench + newDeadlift;
       const prevTotal = profile?.total_workouts ?? 0;
-      const prevStreak = profile?.current_streak_days ?? 0;
-      const newStreak = prevStreak + 1;
+
+      const streakResult = await updateProfileStreak(userId);
 
       const profileUpdates: any = {
         total_workouts: prevTotal + 1,
-        current_streak_days: newStreak,
+        current_streak_days: streakResult.current_streak_days,
+        longest_streak_days: streakResult.longest_streak_days,
         updated_at: new Date().toISOString(),
       };
 
@@ -244,9 +246,6 @@ export default function WorkoutSummaryScreen() {
       if (newBench !== (profile?.bench_e1rm ?? 0)) profileUpdates.bench_e1rm = newBench;
       if (newDeadlift !== (profile?.deadlift_e1rm ?? 0)) profileUpdates.deadlift_e1rm = newDeadlift;
       if (newScore !== prevScore) profileUpdates.strength_score = newScore;
-      if (newStreak > (profile?.longest_streak_days ?? 0)) {
-        profileUpdates.longest_streak_days = newStreak;
-      }
 
       await supabase.from('profiles').update(profileUpdates).eq('id', userId);
 
@@ -282,7 +281,7 @@ export default function WorkoutSummaryScreen() {
         prs,
         newStrengthScore: newScore > 0 ? newScore : null,
         prevStrengthScore: prevScore > 0 ? prevScore : null,
-        streak: newStreak,
+        streak: streakResult.current_streak_days,
       };
 
       setSummary(summaryData);

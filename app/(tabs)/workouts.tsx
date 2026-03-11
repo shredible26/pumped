@@ -6,17 +6,17 @@ import {
   ScrollView,
   Pressable,
   RefreshControl,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { format, formatDistanceToNow } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
+import { parseLocalDate } from '@/utils/date';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
 
-interface PastWorkout {
+interface PastWorkoutRow {
   id: string;
   name: string;
   date: string;
@@ -24,6 +24,9 @@ interface PastWorkout {
   total_volume: number | null;
   exercise_count: number | null;
   pr_count: number | null;
+  is_rest_day?: boolean;
+  is_cardio?: boolean;
+  completed_at?: string | null;
 }
 
 interface SavedWorkout {
@@ -39,23 +42,32 @@ export default function WorkoutsScreen() {
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
 
-  const [pastWorkouts, setPastWorkouts] = useState<PastWorkout[]>([]);
+  const [pastWorkouts, setPastWorkouts] = useState<PastWorkoutRow[]>([]);
   const [savedWorkouts, setSavedWorkouts] = useState<SavedWorkout[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [showAll, setShowAll] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!session?.user?.id) return;
     const userId = session.user.id;
 
-    const { data: past } = await supabase
+    const { data: raw } = await supabase
       .from('workout_sessions')
-      .select('id, name, date, duration_seconds, total_volume, exercise_count, pr_count')
+      .select('id, name, date, duration_seconds, total_volume, exercise_count, pr_count, is_rest_day, is_cardio, completed_at')
       .eq('user_id', userId)
       .eq('completed', true)
       .order('date', { ascending: false })
-      .limit(showAll ? 100 : 5);
-    if (past) setPastWorkouts(past);
+      .order('completed_at', { ascending: false })
+      .limit(500);
+
+    if (raw) {
+      const workoutsOnly = (raw as PastWorkoutRow[]).filter((s) => !s.is_rest_day);
+      workoutsOnly.sort((a, b) => {
+        const d = b.date.localeCompare(a.date);
+        if (d !== 0) return d;
+        return (b.completed_at ?? '').localeCompare(a.completed_at ?? '');
+      });
+      setPastWorkouts(workoutsOnly);
+    }
 
     try {
       const { data: saved } = await supabase
@@ -67,7 +79,7 @@ export default function WorkoutsScreen() {
     } catch {
       // Table may not exist yet
     }
-  }, [session?.user?.id, showAll]);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     fetchData();
@@ -98,15 +110,8 @@ export default function WorkoutsScreen() {
       >
         <Text style={styles.title}>Workouts</Text>
 
-        {/* Past Workouts */}
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionHeader}>Past Workouts</Text>
-          {pastWorkouts.length > 5 && !showAll && (
-            <Pressable onPress={() => setShowAll(true)}>
-              <Text style={styles.seeAll}>See All</Text>
-            </Pressable>
-          )}
-        </View>
+        {/* Past Workouts — only logged workouts (no rest days), indexed by date, 5 visible at a time */}
+        <Text style={styles.sectionHeader}>Past Workouts</Text>
 
         {pastWorkouts.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -141,7 +146,7 @@ export default function WorkoutsScreen() {
                     )}
                   </View>
                   <Text style={styles.workoutMeta}>
-                    {format(new Date(w.date), 'MMM d')}
+                    {format(parseLocalDate(w.date), 'MMM d')}
                     {w.duration_seconds
                       ? ` · ${Math.round(w.duration_seconds / 60)} min`
                       : ''}

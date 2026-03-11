@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
+import { DurationInput } from '@/components/ui/DurationInput';
 import { useAuthStore } from '@/stores/authStore';
 import { getTodaysPlan } from '@/services/ai';
 import { fetchExercises } from '@/services/exercises';
@@ -23,7 +24,10 @@ import {
   completeSession,
 } from '@/services/workouts';
 import { applyWorkoutFatigue } from '@/services/fatigue';
+import { updateProfileStreak } from '@/services/streak';
 import { supabase } from '@/services/supabase';
+import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
+import { getLocalDateString } from '@/utils/date';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
 import { Exercise } from '@/types/exercise';
 
@@ -60,10 +64,10 @@ export default function WorkoutLogScreen() {
   const [plan, setPlan] = useState<GeneratedWorkout | null>(null);
   const [loading, setLoading] = useState(true);
   const [exercises, setExercises] = useState<LogExercise[]>([]);
-  const [duration, setDuration] = useState('45');
+  const [workoutName, setWorkoutName] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState(45);
   const [saving, setSaving] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
-  const [saveWorkoutName, setSaveWorkoutName] = useState('');
   const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
   const [allExercises, setAllExercises] = useState<Exercise[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -82,7 +86,10 @@ export default function WorkoutLogScreen() {
       setPlan(p);
       if (p) {
         setExercises(planToLogExercises(p));
-        setDuration(p.estimated_minutes ? String(p.estimated_minutes) : '45');
+        setWorkoutName(p.name || 'AI Workout');
+        setDurationMinutes(p.estimated_minutes ?? 45);
+      } else {
+        setWorkoutName('Custom Workout');
       }
       setLoading(false);
     })();
@@ -167,11 +174,19 @@ export default function WorkoutLogScreen() {
     if (!session?.user?.id || exercises.length === 0) return;
     setSaving(true);
     try {
-      const durationSec = (parseInt(duration, 10) || 45) * 60;
+      const durationSec = durationMinutes * 60;
+      const trimmed = workoutName.trim();
+      const genericNames = ['AI Workout', 'Custom Workout', 'My Workout'];
+      const userSpecified = trimmed && !genericNames.includes(trimmed);
+      const resolvedName = userSpecified
+        ? trimmed
+        : generateWorkoutNameFromExercises(
+            exercises.map((e) => ({ primary_muscle: e.primary_muscle, name: e.name }))
+          ) || plan?.name || 'AI Workout';
       const ws = await createSession({
         user_id: session.user.id,
-        date: new Date().toISOString().split('T')[0],
-        name: plan?.name ?? 'AI Workout',
+        date: getLocalDateString(),
+        name: resolvedName,
         workout_type: (plan?.type ?? null) as any,
         source: 'ai_generated',
         exercise_count: exercises.length,
@@ -226,24 +241,24 @@ export default function WorkoutLogScreen() {
       await applyWorkoutFatigue(session.user.id, contributions).catch(() => {});
 
       const prevTotal = profile?.total_workouts ?? 0;
-      const prevStreak = profile?.current_streak_days ?? 0;
       await supabase
         .from('profiles')
         .update({
           total_workouts: prevTotal + 1,
-          current_streak_days: prevStreak + 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', session.user.id);
+
+      const streakResult = await updateProfileStreak(session.user.id);
 
       const { data: updated } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .single();
-      if (updated) setProfile(updated as any);
+      if (updated) setProfile({ ...updated, ...streakResult } as any);
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString();
       await supabase
         .from('ai_workout_plans')
         .update({ used: true })
@@ -260,12 +275,13 @@ export default function WorkoutLogScreen() {
   }, [
     session?.user?.id,
     exercises,
-    duration,
+    durationMinutes,
     totalSets,
     totalVolume,
     plan,
     profile,
     setProfile,
+    workoutName,
   ]);
 
   const handleSaveWorkout = async () => {
@@ -273,7 +289,7 @@ export default function WorkoutLogScreen() {
     try {
       await supabase.from('saved_workouts').insert({
         user_id: session.user.id,
-        name: saveWorkoutName || plan?.name || 'My Workout',
+        name: workoutName.trim() || plan?.name || 'My Workout',
         workout_type: (plan?.type ?? null) as any,
         exercises: exercises.map((e) => ({ name: e.name, sets: e.sets.length })),
         last_used_at: new Date().toISOString(),
@@ -316,18 +332,24 @@ export default function WorkoutLogScreen() {
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.workoutName}>{plan.name}</Text>
+        <TextInput
+          style={styles.workoutNameInput}
+          value={workoutName}
+          onChangeText={setWorkoutName}
+          placeholder="Workout name"
+          placeholderTextColor={colors.text.tertiary}
+          selectTextOnFocus
+        />
 
         <View style={styles.durationRow}>
           <Ionicons name="time-outline" size={18} color={colors.text.secondary} />
           <Text style={styles.durationLabel}>Duration</Text>
-          <TextInput
-            style={styles.durationInput}
-            value={duration}
-            onChangeText={setDuration}
-            keyboardType="numeric"
-          />
-          <Text style={styles.durationUnit}>min</Text>
+          <View style={styles.durationPickerWrap}>
+            <DurationInput
+              totalMinutes={durationMinutes}
+              onMinutesChange={setDurationMinutes}
+            />
+          </View>
         </View>
 
         {exercises.map((ex, exIdx) => (
@@ -425,20 +447,34 @@ export default function WorkoutLogScreen() {
                 />
               </View>
             </View>
-            <Pressable
-              style={styles.editOkBtn}
-              onPress={() => {
-                if (editingSet)
-                  updateSet(
-                    editingSet.exIdx,
-                    editingSet.setIdx,
-                    editWeight,
-                    editReps
-                  );
-              }}
-            >
-              <Text style={styles.editOkText}>OK</Text>
-            </Pressable>
+            <View style={styles.editActionsRow}>
+              <Pressable
+                style={styles.deleteSetBtn}
+                onPress={() => {
+                  if (editingSet) {
+                    removeSet(editingSet.exIdx, editingSet.setIdx);
+                    setEditingSet(null);
+                  }
+                }}
+              >
+                <Ionicons name="trash-outline" size={18} color={colors.text.inverse} />
+                <Text style={styles.deleteSetText}>Delete Set</Text>
+              </Pressable>
+              <Pressable
+                style={styles.editOkBtn}
+                onPress={() => {
+                  if (editingSet)
+                    updateSet(
+                      editingSet.exIdx,
+                      editingSet.setIdx,
+                      editWeight,
+                      editReps
+                    );
+                }}
+              >
+                <Text style={styles.editOkText}>OK</Text>
+              </Pressable>
+            </View>
           </View>
         </Pressable>
       </Modal>
@@ -500,6 +536,9 @@ export default function WorkoutLogScreen() {
             </View>
             <Text style={styles.saveTitle}>Save This Workout?</Text>
             <Text style={styles.saveSubtitle}>Reuse it next time</Text>
+            <Text style={styles.saveWorkoutNameDisplay}>
+              {workoutName.trim() || plan?.name || 'My Workout'}
+            </Text>
             {exercises.slice(0, 5).map((e, i) => (
               <View key={i} style={styles.saveExRow}>
                 <Ionicons name="checkmark-circle" size={18} color={colors.accent.primary} />
@@ -507,13 +546,6 @@ export default function WorkoutLogScreen() {
                 <Text style={styles.saveExSets}>{e.sets.length} sets</Text>
               </View>
             ))}
-            <TextInput
-              style={styles.saveNameInput}
-              placeholder="Name this workout (e.g., My Push Day)"
-              placeholderTextColor={colors.text.tertiary}
-              value={saveWorkoutName}
-              onChangeText={setSaveWorkoutName}
-            />
             <Pressable style={styles.saveButton} onPress={handleSaveWorkout}>
               <Text style={styles.saveButtonText}>Save Workout</Text>
             </Pressable>
@@ -549,11 +581,14 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   scroll: { flex: 1, paddingHorizontal: spacing.xl },
-  workoutName: {
+  workoutNameInput: {
     fontSize: font.xxl,
     fontWeight: '700',
     color: colors.text.primary,
     marginBottom: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.default,
   },
   durationRow: {
     flexDirection: 'row',
@@ -567,14 +602,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   durationLabel: { flex: 1, fontSize: font.md, color: colors.text.secondary },
-  durationInput: {
-    fontSize: font.lg,
-    fontWeight: '700',
-    color: colors.text.primary,
-    minWidth: 48,
-    textAlign: 'right',
-  },
-  durationUnit: { fontSize: font.md, color: colors.text.tertiary },
+  durationPickerWrap: { flex: 1 },
   exerciseCard: {
     backgroundColor: colors.bg.card,
     borderRadius: radius.md,
@@ -685,12 +713,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.light,
   },
+  editActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    gap: spacing.md,
+  },
+  deleteSetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.error,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+  },
+  deleteSetText: { color: colors.text.inverse, fontWeight: '700', fontSize: font.sm },
   editOkBtn: {
+    flex: 1,
     backgroundColor: colors.accent.primary,
     paddingVertical: spacing.md,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: spacing.lg,
   },
   editOkText: { color: colors.text.inverse, fontWeight: '700', fontSize: font.md },
   searchContainer: { flex: 1, backgroundColor: colors.bg.primary },
@@ -745,6 +790,13 @@ const styles = StyleSheet.create({
   },
   saveTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary, textAlign: 'center' },
   saveSubtitle: { fontSize: font.sm, color: colors.text.secondary, textAlign: 'center', marginTop: 4 },
+  saveWorkoutNameDisplay: {
+    fontSize: font.md,
+    fontWeight: '600',
+    color: colors.accent.primary,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
   saveExRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -753,16 +805,6 @@ const styles = StyleSheet.create({
   },
   saveExName: { flex: 1, fontSize: font.md, color: colors.text.primary },
   saveExSets: { fontSize: font.sm, color: colors.text.secondary },
-  saveNameInput: {
-    backgroundColor: colors.bg.input,
-    borderRadius: radius.md,
-    padding: spacing.lg,
-    marginTop: spacing.lg,
-    fontSize: font.md,
-    color: colors.text.primary,
-    borderWidth: 1,
-    borderColor: colors.border.default,
-  },
   saveButton: {
     backgroundColor: colors.accent.primary,
     paddingVertical: spacing.lg,

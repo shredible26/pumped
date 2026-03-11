@@ -22,3 +22,14 @@ export async function searchExercises(query: string): Promise<Exercise[]> {
   if (error) throw error;
   return data as Exercise[];
 }
+
+export async function fetchCardioExercises(): Promise<Exercise[]> {
+  const { data, error } = await supabase
+    .from('exercises')
+    .select('*')
+    .eq('movement_pattern', 'cardio')
+    .order('name');
+
+  if (error) throw error;
+  return data as Exercise[];
+}

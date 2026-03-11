@@ -15,11 +15,15 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { colors, font, spacing, radius } from '@/utils/theme';
+import { DurationInput } from '@/components/ui/DurationInput';
 import { REST_DURATIONS } from '@/utils/constants';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchExercises } from '@/services/exercises';
 import { createSession, insertSetLogs, completeSession } from '@/services/workouts';
+import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
+import { getLocalDateString } from '@/utils/date';
 import { applyWorkoutFatigue } from '@/services/fatigue';
+import { updateProfileStreak } from '@/services/streak';
 import { supabase } from '@/services/supabase';
 import { Exercise } from '@/types/exercise';
 import { e1rm } from '@/utils/epley';
@@ -37,13 +41,14 @@ interface SpeedExercise {
 
 export default function SpeedLogEditorScreen() {
   const router = useRouter();
-  const { type } = useLocalSearchParams<{ type: string }>();
+  const { type, date: dateParam } = useLocalSearchParams<{ type: string; date?: string }>();
   const sessionAuth = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
 
   const [exercises, setExercises] = useState<SpeedExercise[]>([]);
-  const [duration, setDuration] = useState('45');
+  const [workoutName, setWorkoutName] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState(45);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [allExercises, setAllExercises] = useState<Exercise[]>([]);
@@ -60,6 +65,10 @@ export default function SpeedLogEditorScreen() {
   useEffect(() => {
     loadExercises();
   }, []);
+
+  useEffect(() => {
+    setWorkoutName(`New ${type ?? 'Custom'} Workout`);
+  }, [type]);
 
   const loadExercises = async () => {
     setLoadingDb(true);
@@ -179,12 +188,26 @@ export default function SpeedLogEditorScreen() {
 
     try {
       const userId = sessionAuth.user.id;
-      const durationSec = (parseInt(duration, 10) || 45) * 60;
+      const durationSec = durationMinutes * 60;
 
+      const trimmed = workoutName.trim();
+      const isDefaultName = !trimmed || /^New .+ Workout$/.test(trimmed);
+      const resolvedName =
+        !isDefaultName
+          ? trimmed
+          : generateWorkoutNameFromExercises(
+              exercises.map((e) => ({
+                primary_muscle: e.exercise.primary_muscle,
+                name: e.exercise.name,
+              }))
+            ) || `${type || 'Custom'} Workout`;
+      const sessionDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+        ? dateParam
+        : getLocalDateString();
       const ws = await createSession({
         user_id: userId,
-        date: new Date().toISOString().split('T')[0],
-        name: `${type || 'Custom'} Workout`,
+        date: sessionDate,
+        name: resolvedName,
         workout_type: (type?.toLowerCase() as any) ?? null,
         source: 'custom',
         exercise_count: exercises.length,
@@ -234,22 +257,22 @@ export default function SpeedLogEditorScreen() {
       await applyWorkoutFatigue(userId, contributions).catch(() => {});
 
       const prevTotal = profile?.total_workouts ?? 0;
-      const prevStreak = profile?.current_streak_days ?? 0;
       await supabase
         .from('profiles')
         .update({
           total_workouts: prevTotal + 1,
-          current_streak_days: prevStreak + 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
+
+      const streakResult = await updateProfileStreak(userId);
 
       const { data: updated } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
-      if (updated) setProfile(updated as any);
+      if (updated) setProfile({ ...updated, ...streakResult } as any);
 
       clearActiveWorkout();
 
@@ -257,6 +280,7 @@ export default function SpeedLogEditorScreen() {
         pathname: '/speedlog/save',
         params: {
           type: type ?? 'Custom',
+          workoutName: workoutName.trim() || `My ${type ?? 'Custom'} Day`,
           exerciseNames: exercises.map((e) => e.exercise.name).join('|'),
           exerciseSets: exercises.map((e) => e.sets.length).join('|'),
         },
@@ -287,7 +311,14 @@ export default function SpeedLogEditorScreen() {
         contentContainerStyle={{ paddingBottom: 140 }}
       >
         <View style={styles.titleRow}>
-          <Text style={styles.workoutTitle}>New {type} workout</Text>
+          <TextInput
+            style={styles.workoutTitleInput}
+            value={workoutName}
+            onChangeText={setWorkoutName}
+            placeholder={`New ${type ?? 'Custom'} workout`}
+            placeholderTextColor={colors.text.tertiary}
+            selectTextOnFocus
+          />
           <View style={styles.newBadge}>
             <Text style={styles.newBadgeText}>NEW</Text>
           </View>
@@ -306,13 +337,12 @@ export default function SpeedLogEditorScreen() {
         <View style={styles.durationRow}>
           <Ionicons name="time-outline" size={18} color={colors.text.secondary} />
           <Text style={styles.durationLabel}>Duration</Text>
-          <TextInput
-            style={styles.durationInput}
-            value={duration}
-            onChangeText={setDuration}
-            keyboardType="numeric"
-          />
-          <Text style={styles.durationUnit}>min</Text>
+          <View style={styles.durationPickerWrap}>
+            <DurationInput
+              totalMinutes={durationMinutes}
+              onMinutesChange={setDurationMinutes}
+            />
+          </View>
         </View>
 
         {/* Exercise cards */}
@@ -411,9 +441,23 @@ export default function SpeedLogEditorScreen() {
                   />
                 </View>
               </View>
-              <Pressable style={styles.editOkBtn} onPress={confirmEditSet}>
-                <Text style={styles.editOkText}>OK</Text>
-              </Pressable>
+              <View style={styles.editActionsRow}>
+                <Pressable
+                  style={styles.deleteSetBtn}
+                  onPress={() => {
+                    if (editingSet) {
+                      removeSet(editingSet.exIdx, editingSet.setIdx);
+                      setEditingSet(null);
+                    }
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.text.inverse} />
+                  <Text style={styles.deleteSetText}>Delete Set</Text>
+                </Pressable>
+                <Pressable style={styles.editOkBtn} onPress={confirmEditSet}>
+                  <Text style={styles.editOkText}>OK</Text>
+                </Pressable>
+              </View>
             </Pressable>
           </View>
         </Pressable>
@@ -498,6 +542,13 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, paddingHorizontal: spacing.xl },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
   workoutTitle: { fontSize: font.xxl, fontWeight: '700', color: colors.text.primary },
+  workoutTitleInput: {
+    flex: 1,
+    fontSize: font.xxl,
+    fontWeight: '700',
+    color: colors.text.primary,
+    paddingVertical: spacing.xs,
+  },
   newBadge: {
     backgroundColor: colors.accent.bg,
     paddingHorizontal: spacing.sm,
@@ -529,14 +580,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   durationLabel: { flex: 1, fontSize: font.md, color: colors.text.secondary },
-  durationInput: {
-    fontSize: font.lg,
-    fontWeight: '700',
-    color: colors.text.primary,
-    minWidth: 40,
-    textAlign: 'right',
-  },
-  durationUnit: { fontSize: font.md, color: colors.text.tertiary },
+  durationPickerWrap: { flex: 1 },
   exerciseCard: {
     backgroundColor: colors.bg.card,
     borderRadius: radius.md,
@@ -645,12 +689,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.light,
   },
+  editActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    gap: spacing.md,
+  },
+  deleteSetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.error,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+  },
+  deleteSetText: { color: colors.text.inverse, fontWeight: '700', fontSize: font.sm },
   editOkBtn: {
+    flex: 1,
     backgroundColor: colors.accent.primary,
     paddingVertical: spacing.md,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: spacing.lg,
   },
   editOkText: { color: colors.text.inverse, fontWeight: '700', fontSize: font.md },
 

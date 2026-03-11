@@ -49,7 +49,7 @@ export default function WorkoutPreviewScreen() {
     router.push('/workout/log');
   };
 
-  const handleRegenerate = async () => {
+  const handleCustomize = async () => {
     const remaining = await getGenerationCreditsRemaining(profile ?? null);
     if (remaining <= 0) {
       Alert.alert(
@@ -59,12 +59,12 @@ export default function WorkoutPreviewScreen() {
       return;
     }
     Alert.alert(
-      'Regenerate Workout',
-      `You have ${remaining} credit${remaining === 1 ? '' : 's'} remaining today. Regenerate?`,
+      'Customize Workout',
+      `This will customize your workout and use 1 of your ${remaining} remaining daily credits. Continue?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Confirm',
+          text: 'Continue',
           onPress: () => router.push('/workout/modifications'),
         },
       ]
@@ -204,9 +204,9 @@ export default function WorkoutPreviewScreen() {
         <Pressable style={styles.startButton} onPress={handleLogWorkout}>
           <Text style={styles.startButtonText}>Log This Workout</Text>
         </Pressable>
-        <Pressable style={styles.regenerateButton} onPress={() => void handleRegenerate()}>
-          <Ionicons name="refresh" size={20} color={colors.text.primary} />
-          <Text style={styles.regenerateButtonText}>Regenerate Workout</Text>
+        <Pressable style={styles.customizeButton} onPress={() => void handleCustomize()}>
+          <Ionicons name="create-outline" size={20} color={colors.text.primary} />
+          <Text style={styles.customizeButtonText}>Customize Workout</Text>
         </Pressable>
       </View>
 
@@ -404,7 +404,7 @@ const styles = StyleSheet.create({
     fontSize: font.lg,
     fontWeight: '700',
   },
-  regenerateButton: {
+  customizeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.light,
   },
-  regenerateButtonText: {
+  customizeButtonText: {
     fontSize: font.lg,
     fontWeight: '700',
     color: colors.text.primary,

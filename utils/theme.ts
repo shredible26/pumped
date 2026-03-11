@@ -30,8 +30,6 @@ export const colors = {
   program: {
     ppl: '#8B5CF6',
     upper_lower: '#3B82F6',
-    bro_split: '#F97316',
-    full_body: '#EC4899',
     aesthetic: '#EC4899',
     ai_optimal: '#4ADE80',
   },

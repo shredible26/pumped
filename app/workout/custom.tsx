@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useWorkoutStore, ActiveExercise } from '@/stores/workoutStore';
 import { fetchExercises } from '@/services/exercises';
 import { createSession } from '@/services/workouts';
+import { getLocalDateString } from '@/utils/date';
 import { Exercise } from '@/types/exercise';
 
 interface CustomExercise {
@@ -108,7 +109,7 @@ export default function CustomWorkoutScreen() {
     try {
       const ws = await createSession({
         user_id: session.user.id,
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(),
         name,
         workout_type: null,
         source: 'custom',

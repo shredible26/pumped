@@ -46,15 +46,15 @@ export default function OnboardingScreen() {
   const [frequency, setFrequency] = useState(4);
   const [equipment, setEquipment] = useState('full_gym');
 
-  // Step 3
+  // Step 3: 1-rep max only — weight optional, reps fixed at 1
   const [lifts, setLifts] = useState({
-    squat: { weight: '', reps: '' },
-    bench: { weight: '', reps: '' },
-    deadlift: { weight: '', reps: '' },
+    squat: { weight: '' },
+    bench: { weight: '' },
+    deadlift: { weight: '' },
   });
 
-  const updateLift = (lift: 'squat' | 'bench' | 'deadlift', field: 'weight' | 'reps', value: string) => {
-    setLifts((prev) => ({ ...prev, [lift]: { ...prev[lift], [field]: value } }));
+  const updateLiftWeight = (lift: 'squat' | 'bench' | 'deadlift', value: string) => {
+    setLifts((prev) => ({ ...prev, [lift]: { weight: value } }));
   };
 
   const canAdvance = () => {
@@ -69,14 +69,15 @@ export default function OnboardingScreen() {
 
     try {
       const totalInches = (parseInt(heightFt) || 0) * 12 + (parseInt(heightIn) || 0);
-      const sqE1rm = !skip && lifts.squat.weight && lifts.squat.reps
-        ? e1rm(parseFloat(lifts.squat.weight), parseInt(lifts.squat.reps))
+      // 1RM: reps are always 1 when weight is entered
+      const sqE1rm = !skip && lifts.squat.weight && Number(lifts.squat.weight) > 0
+        ? e1rm(parseFloat(lifts.squat.weight), 1)
         : 0;
-      const bnE1rm = !skip && lifts.bench.weight && lifts.bench.reps
-        ? e1rm(parseFloat(lifts.bench.weight), parseInt(lifts.bench.reps))
+      const bnE1rm = !skip && lifts.bench.weight && Number(lifts.bench.weight) > 0
+        ? e1rm(parseFloat(lifts.bench.weight), 1)
         : 0;
-      const dlE1rm = !skip && lifts.deadlift.weight && lifts.deadlift.reps
-        ? e1rm(parseFloat(lifts.deadlift.weight), parseInt(lifts.deadlift.reps))
+      const dlE1rm = !skip && lifts.deadlift.weight && Number(lifts.deadlift.weight) > 0
+        ? e1rm(parseFloat(lifts.deadlift.weight), 1)
         : 0;
       const score = strengthScore(sqE1rm, bnE1rm, dlE1rm);
 
@@ -131,6 +132,12 @@ export default function OnboardingScreen() {
     }
   };
 
+  // Avoid double-submit and ensure we always clear saving state
+  const handleCompleteSafe = (skip: boolean) => {
+    if (saving) return;
+    void handleComplete(skip);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -181,7 +188,7 @@ export default function OnboardingScreen() {
             />
           )}
           {step === 2 && (
-            <StepStrengthCheck lifts={lifts} updateLift={updateLift} />
+            <StepStrengthCheck lifts={lifts} updateLiftWeight={updateLiftWeight} />
           )}
         </ScrollView>
 
@@ -205,14 +212,14 @@ export default function OnboardingScreen() {
             <View style={styles.finalButtons}>
               <Pressable
                 style={styles.skipButton}
-                onPress={() => handleComplete(true)}
+                onPress={() => handleCompleteSafe(true)}
                 disabled={saving}
               >
                 <Text style={styles.skipButtonText}>Skip</Text>
               </Pressable>
               <Pressable
                 style={[styles.nextButton, styles.startButton, saving && styles.buttonDisabled]}
-                onPress={() => handleComplete(false)}
+                onPress={() => handleCompleteSafe(false)}
                 disabled={saving}
               >
                 {saving ? (
@@ -381,19 +388,20 @@ function StepTrainingStyle({
   );
 }
 
-/* ─── Step 3: Quick Strength Check ─── */
+/* ─── Step 3: Quick Strength Check (1-rep max only) ─── */
 
 function StepStrengthCheck({
-  lifts, updateLift,
+  lifts,
+  updateLiftWeight,
 }: {
-  lifts: { squat: { weight: string; reps: string }; bench: { weight: string; reps: string }; deadlift: { weight: string; reps: string } };
-  updateLift: (lift: 'squat' | 'bench' | 'deadlift', field: 'weight' | 'reps', value: string) => void;
+  lifts: { squat: { weight: string }; bench: { weight: string }; deadlift: { weight: string } };
+  updateLiftWeight: (lift: 'squat' | 'bench' | 'deadlift', value: string) => void;
 }) {
   return (
     <View>
       <Text style={styles.stepTitle}>Quick Strength Check</Text>
       <Text style={styles.stepSubtitle}>
-        Log any recent lifts to calibrate your plan. This is optional.
+        Optionally enter your 1-rep max (lbs) for each lift to calibrate your plan.
       </Text>
 
       {(['squat', 'bench', 'deadlift'] as const).map((lift) => (
@@ -405,28 +413,18 @@ function StepStrengthCheck({
             <View style={styles.liftInputWrap}>
               <TextInput
                 style={styles.liftInput}
-                placeholder="0"
+                placeholder="Optional"
                 placeholderTextColor={colors.text.tertiary}
                 keyboardType="decimal-pad"
                 value={lifts[lift].weight}
-                onChangeText={(v) => updateLift(lift, 'weight', v)}
+                onChangeText={(v) => updateLiftWeight(lift, v)}
                 maxLength={5}
+                editable={true}
               />
               <Text style={styles.liftUnit}>lbs</Text>
             </View>
             <Text style={styles.liftX}>×</Text>
-            <View style={styles.liftInputWrap}>
-              <TextInput
-                style={styles.liftInput}
-                placeholder="0"
-                placeholderTextColor={colors.text.tertiary}
-                keyboardType="number-pad"
-                value={lifts[lift].reps}
-                onChangeText={(v) => updateLift(lift, 'reps', v)}
-                maxLength={3}
-              />
-              <Text style={styles.liftUnit}>reps</Text>
-            </View>
+            <Text style={styles.liftRepsFixed}>1 rep</Text>
           </View>
         </View>
       ))}
@@ -650,6 +648,12 @@ const styles = StyleSheet.create({
     fontSize: font.lg,
     color: colors.text.tertiary,
     fontWeight: '600',
+  },
+  liftRepsFixed: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    fontWeight: '600',
+    minWidth: 48,
   },
 
   // Footer

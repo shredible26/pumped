@@ -23,16 +23,15 @@ Remove any existing "History" and "Strength" tabs. Those are now sections within
 This is the most important screen. Rebuild it completely with this exact layout from top to bottom:
 
 ### 1.1 Weekly Calendar Strip (TOP)
-- Horizontal row showing the current week (Sun through Sat)
-- Each day shows: day abbreviation on top (SUN, MON, etc.), date number below, and a dot indicator if there's a workout logged that day
-- Today's date should be highlighted with a filled oval/pill background (use the card background color, slightly lighter than the main bg)
-- Today should be visually prominent — bigger or highlighted
-- The calendar should show the days around today (a few days before and after)
-- Style reference: similar to the Tonal app calendar (clean, minimal, dark background)
+- Horizontal row showing the current week (Sun through Sat). All days are tappable (past, today, future).
+- Each day shows: day abbreviation on top (SUN, MON, etc.), date number below.
+- **Green dot** under the date only when that day has logged activity (workout, rest, or cardio) **and** the day is **not** in the future. No green dot on future dates.
+- Selected day has the highlighted pill background; today is visually prominent.
+- Style reference: similar to the Tonal app calendar (clean, minimal, dark background).
 
-### 1.2 Welcome Message
-- Below the calendar: "Welcome, {firstName}" in large bold text (28pt)
-- Subtitle: "You have X workouts today" or "Rest day — recover and grow" based on the schedule
+### 1.2 Date / Welcome Line
+- Below the calendar: show the **date** for the selected day in large text, e.g. "Tuesday, Mar 10" (`format(selectedDate, 'EEEE, MMM d')`). No "Welcome, username" — date only for all days (today, past, future).
+- Subtitle/context below can indicate scheduled type, "Rest day — recover and grow", or "X workouts completed" for past days.
 
 ### 1.3 Today's Workout Card
 - A prominent card with:
@@ -60,16 +59,21 @@ This is the most important screen. Rebuild it completely with this exact layout 
 - NEW: When a user first creates an account, ALL muscles should be GRAY (no data) until they log their first workout. After a workout, only the trained muscles change color. This is more honest than showing everything as "recovered."
 
 ### 1.5 Quick Stats Row (bottom of scroll)
-- 3 small horizontal cards:
-  - Total Workouts (number)
-  - Current Streak (X days, with fire emoji)
-  - This Week (X/Y workouts completed vs target)
+- 3 small horizontal cards: Total Workouts, Current Streak (X days, fire emoji), This Week (X/Y vs target).
+- **Shown only when the selected date is today.** Hidden when viewing a past or future day.
+
+### 1.6 This Week's Plan (RoutineTimeline)
+- Horizontal timeline at bottom of Today screen (above tab bar): 7 nodes for Mon–Sun. Uses `utils/schedule.ts` — `getWorkoutTypeForDate(programStyle, date, trainingFrequency)` so labels match the schedule.
+- **Only today's node** is filled green. Other days: outline circle; **checkmark only on past days that were logged** (no checkmark on future days).
+- See `components/home/RoutineTimeline.tsx` and technical spec §7.4.
 
 ---
 
 ## SPEED LOG FLOW
 
-When the user taps "Speed Log" on the home screen, open a full-screen modal with this flow:
+When the user taps "Speed Log" on the home screen, open the Speed Log flow. **Pass the currently selected date** so logging on a past day saves the session to that date (e.g. `router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })`). The editor uses that date when creating the session; when no param, use local today via `getLocalDateString()` from `utils/date.ts`.
+
+Flow:
 
 ### Screen 1: "Speed Log — What did you work on?"
 - Header: "Speed Log" centered, X close button top-left
@@ -84,7 +88,7 @@ When the user selects a workout type (or starts from scratch), show:
 - Header: lightning bolt + "Speed Log" centered, X close button
 - Subtitle: "New [Type] workout" with a "NEW" badge
 - If first time logging this type, show a yellow info banner: "Predictions may be off — No history for [type] yet. These are default suggestions. The more you log, the smarter Speed Log gets."
-- **Duration** row: clock icon + "Duration" label + editable time value (default 45 min), tappable to change
+- **Duration** row: two text inputs for Hours and Minutes (component `DurationInput.tsx`), default e.g. 0h 45m
 - **Exercise cards** — for each exercise:
   - Exercise name (bold, e.g., "Overhead Press") with an X button to remove
   - Set pills in a horizontal row: each pill shows "115 x 8" format
@@ -214,19 +218,10 @@ Rebuild this screen completely. It should be a ScrollView with these sections:
 This is a new screen. Build it as a ScrollView with these sections:
 
 ### 3.1 Past Workouts
-- "Past Workouts" section header with a "See All" link
-- Show the last 5 workouts as cards:
-  - Workout name (e.g., "Push Day")
-  - Date + Duration + Volume
-  - Number of exercises
-  - PR badge if applicable
-- Tapping a workout opens the session detail screen (keep existing)
-- "See All" opens a full list view grouped by week with weekly volume summaries:
-  - "This Week — 3 workouts — 42,350 lbs"
-    - Workout cards underneath
-  - "Last Week — 4 workouts — 51,200 lbs"
-    - Workout cards underneath
-  - Infinite scroll
+- "Past Workouts" section: scrollable list of **all** completed workouts the user has ever logged (exclude rest-day-only entries when a workout was also logged that day). Rendered inside the tab's ScrollView (e.g. `.map()` over sessions — do not nest VirtualizedList inside ScrollView).
+- Each card: workout name (e.g. from session or AI-generated via `utils/workoutName.ts`), **date** (use `parseLocalDate(session.date)` then format so timezone is correct), duration, volume.
+- Tapping a workout opens session detail `app/history/[id].tsx`. Dates displayed there also use `parseLocalDate(session.date)` for consistency.
+- See technical spec §Implementation Status for date handling and Past Workouts behavior.
 
 ### 3.2 Saved Workouts
 - "Saved Workouts" section header
@@ -256,7 +251,7 @@ Keep the existing profile screen mostly as-is but ensure it has:
 - User name + "Since [month] [year]" + program style label
 - Stats row: Strength Score | Total Workouts | Streak
 - Settings list:
-  - Program Style (PPL, Upper/Lower, Bro Split, Full Body, AI Optimal)
+  - Program Style (PPL, Upper/Lower, Aesthetic, AI Optimal)
   - Training Days/Week
   - Equipment Access
   - Body Stats (height, weight)
@@ -326,3 +321,9 @@ Build these changes in this order:
 9. Create the saved_workouts table and wire up save/load
 
 After each step, verify the app compiles and runs without errors before moving to the next step.
+
+---
+
+## IMPLEMENTATION STATUS (March 2026 — Agent Handoff)
+
+Many of these changes are implemented. For current behavior and file paths, see **docs/pumped-technical-spec-v2.md** §7.4 (Home Screen) and §Implementation Status. Summary: calendar green dot only for activity and not on future days; welcome shows date only; RoutineTimeline at bottom with schedule from `utils/schedule.ts`; Speed Log receives selected date param; Past Workouts use `parseLocalDate` for display; duration input is two text fields (Hours/Minutes) via `DurationInput.tsx`.

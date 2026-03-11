@@ -22,12 +22,15 @@ export default function RootLayout() {
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (session) {
-      const needsOnboarding = !profile || !profile.onboarding_completed;
+      // Only show onboarding when profile has loaded and user has not completed it.
+      // Returning users (profile.onboarding_completed === true) go straight to home.
+      const needsOnboarding = profile != null && profile.onboarding_completed === false;
       if (needsOnboarding && !inAuthGroup) {
         router.replace('/(auth)/onboarding');
       } else if (needsOnboarding && inAuthGroup && currentSegments[1] !== 'onboarding') {
         router.replace('/(auth)/onboarding');
-      } else if (!needsOnboarding && inAuthGroup) {
+      } else if ((!needsOnboarding || profile == null) && inAuthGroup) {
+        // Profile null = still loading; or onboarding done → go to home
         router.replace('/(tabs)');
       }
     }

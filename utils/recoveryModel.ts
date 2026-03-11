@@ -26,12 +26,17 @@ const RECOVERY_HOURS: Record<string, number> = {
  */
 const VOLUME_COEFFICIENT = 0.00012;
 
+/**
+ * @param asOfDate If provided, recovery is computed as of this date (for historical view). Otherwise uses now.
+ */
 export function calculateRecovery(
   muscle: string,
   lastTrainedAt: Date,
   volumeLoad: number,
+  asOfDate?: Date,
 ): number {
-  const hoursElapsed = (Date.now() - lastTrainedAt.getTime()) / 3600000;
+  const toTime = (asOfDate ?? new Date()).getTime();
+  const hoursElapsed = (toTime - lastTrainedAt.getTime()) / 3600000;
   const baseHours = RECOVERY_HOURS[muscle] || 60;
   const adjusted = baseHours * (1 + Math.max(0, volumeLoad) * VOLUME_COEFFICIENT);
   const pct = Math.min(100, (1 - Math.exp((-3 * hoursElapsed) / adjusted)) * 100);

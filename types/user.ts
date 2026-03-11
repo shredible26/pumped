@@ -1,4 +1,4 @@
-export type ProgramStyle = 'ppl' | 'upper_lower' | 'bro_split' | 'full_body' | 'ai_optimal';
+export type ProgramStyle = 'ppl' | 'upper_lower' | 'aesthetic' | 'ai_optimal';
 export type EquipmentAccess = 'full_gym' | 'home_gym' | 'bodyweight';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 export type Gender = 'male' | 'female' | 'other';

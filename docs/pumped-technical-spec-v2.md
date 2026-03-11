@@ -32,6 +32,7 @@
 12. Streak System
 13. Cursor Build Prompts (Copy-Paste)
 14. Build Order & Timeline
+15. **Implementation Status (Agent Handoff)** — current behavior, key files, date/schedule logic
 
 ---
 
@@ -51,7 +52,7 @@ The app must be the fastest way to log a workout. Two taps to log a set.
 - Interactive body map (front + back) showing recovery status per muscle
 - Color-coded: green (ready), yellow (moderate), red (fatigued)
 - AI recommends today's workout based on:
-  - User's chosen program style (PPL, Upper/Lower, Bro Split, Full Body, AI Optimal)
+  - User's chosen program style (PPL, Upper/Lower, Aesthetic, AI Optimal)
   - Current muscle fatigue state
   - Recent training history
   - Progressive overload targets
@@ -118,11 +119,13 @@ pumped/
 │   │   ├── signin.tsx
 │   │   └── onboarding.tsx        # Single file, multi-step
 │   ├── (tabs)/
-│   │   ├── _layout.tsx           # Bottom tab bar config
-│   │   ├── index.tsx             # Home (fatigue map + today's workout)
-│   │   ├── history.tsx           # Training history list
-│   │   ├── strength.tsx          # Big 3 tracker + chart
-│   │   └── profile.tsx           # Settings
+│   │   ├── _layout.tsx           # Bottom tab bar: Today, Progress, Workouts, Profile (4 tabs)
+│   │   ├── index.tsx             # Today — calendar, workout card, body map, RoutineTimeline
+│   │   ├── progress.tsx          # Progress — insights, Big 3, volume, muscle distribution
+│   │   ├── workouts.tsx          # Workouts — Past Workouts list, Saved, Create Custom
+│   │   ├── profile.tsx           # Profile — settings, program style, equipment, etc.
+│   │   ├── history.tsx           # (hidden tab; list may live in workouts)
+│   │   └── strength.tsx          # (hidden tab; Big 3 may live in progress)
 │   ├── workout/
 │   │   ├── preview.tsx           # AI workout preview with "Why?" buttons
 │   │   ├── active.tsx            # Active session (set logging)
@@ -137,11 +140,14 @@ pumped/
 │   │   ├── Card.tsx
 │   │   ├── Input.tsx
 │   │   ├── Pill.tsx
-│   │   └── BottomSheet.tsx
+│   │   ├── BottomSheet.tsx
+│   │   ├── DurationInput.tsx     # Hours + Minutes text inputs (replaces wheel picker)
+│   │   └── DurationPicker.tsx    # (legacy; prefer DurationInput)
 │   ├── home/
 │   │   ├── BodyMap.tsx           # SVG front + back body diagram
-│   │   ├── MuscleDetailSheet.tsx # Bottom sheet on muscle tap
-│   │   ├── TodayCard.tsx         # Today's recommended workout card
+│   │   ├── MuscleDetailSheet.tsx # Bottom sheet on muscle tap (uses correct map for selected day)
+│   │   ├── RoutineTimeline.tsx   # "This Week's Plan" Mon–Sun with schedule + today highlight
+│   │   ├── TodayCard.tsx         # (if present)
 │   │   ├── StreakBadge.tsx       # Streak counter pill
 │   │   └── StrengthScoreCard.tsx # Big 3 summary
 │   ├── workout/
@@ -175,7 +181,10 @@ pumped/
 │   ├── epley.ts                  # e1RM formula
 │   ├── recoveryModel.ts          # Fatigue calculation
 │   ├── progression.ts            # Progressive overload logic
-│   └── constants.ts
+│   ├── constants.ts
+│   ├── date.ts                   # parseLocalDate (yyyy-MM-dd → local Date), getLocalDateString (today in local TZ)
+│   ├── schedule.ts               # getWorkoutDayIndices, getWorkoutTypeForDate (shared with RoutineTimeline)
+│   └── workoutName.ts            # generateWorkoutNameFromExercises (AI name when user doesn't set one)
 ├── types/
 │   ├── exercise.ts
 │   ├── workout.ts
@@ -186,7 +195,9 @@ pumped/
 │   │   ├── 001_profiles.sql
 │   │   ├── 002_exercises.sql
 │   │   ├── 003_workouts.sql
-│   │   └── 004_fatigue.sql
+│   │   ├── 004_fatigue.sql
+│   │   ├── 007_cardio_and_rest.sql   # workout_sessions: is_rest_day, is_cardio; cardio exercises seed
+│   │   └── 008_program_style_four_only.sql  # program_style CHECK: ppl, upper_lower, aesthetic, ai_optimal only
 │   └── functions/
 │       └── generate-workout/
 │           └── index.ts
@@ -225,7 +236,7 @@ CREATE TABLE public.profiles (
   height_inches NUMERIC(5,1),
   weight_lbs NUMERIC(5,1),
   program_style TEXT CHECK (program_style IN (
-    'ppl', 'upper_lower', 'bro_split', 'full_body', 'ai_optimal'
+    'ppl', 'upper_lower', 'aesthetic', 'ai_optimal'
   )) DEFAULT 'ppl',
   training_frequency INTEGER DEFAULT 4,
   equipment_access TEXT CHECK (equipment_access IN (
@@ -290,15 +301,17 @@ CREATE TABLE public.workout_sessions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) NOT NULL,
   date DATE DEFAULT CURRENT_DATE,
-  name TEXT NOT NULL,                    -- "Upper Body - Push"
+  name TEXT NOT NULL,                    -- "Upper Body - Push" or AI-generated name from utils/workoutName
   workout_type TEXT,                      -- "push", "pull", "legs", "upper", "lower", "full"
   source TEXT DEFAULT 'ai_generated',    -- "ai_generated", "custom"
   duration_seconds INTEGER,
-  total_volume NUMERIC(10,1) DEFAULT 0,  -- sum of (weight * reps) for all sets
+  total_volume NUMERIC(10,1) DEFAULT 0,
   exercise_count INTEGER DEFAULT 0,
   set_count INTEGER DEFAULT 0,
   pr_count INTEGER DEFAULT 0,
   completed BOOLEAN DEFAULT FALSE,
+  is_rest_day BOOLEAN DEFAULT FALSE,      -- true for logged rest day (007)
+  is_cardio BOOLEAN DEFAULT FALSE,        -- true for cardio sessions (007)
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -408,8 +421,7 @@ export const colors = {
   program: {
     ppl: '#8B5CF6',
     upper_lower: '#3B82F6',
-    bro_split: '#F97316',
-    full_body: '#EC4899',
+    aesthetic: '#EC4899',
     ai_optimal: '#4ADE80',
   },
 };
@@ -479,11 +491,10 @@ Signin: same layout but "Welcome Back" title and navigates to (tabs) on success.
 
 ### Step 2: Training Style
 - "How do you like to train?" title
-- 5 tappable cards (single select):
+- 4 tappable cards (single select):
   - **Push/Pull/Legs** — "The classic 6-day split. Each day targets push, pull, or leg muscles." Color: purple
   - **Upper/Lower** — "4-day split alternating upper and lower body." Color: blue
-  - **Bro Split** — "Each day dedicated to one muscle group." Color: orange
-  - **Full Body** — "Hit every muscle group each session, 3x/week." Color: pink
+  - **Aesthetic** — "Optimized by AI for aesthetics and proportions." Color: pink
   - **AI Optimal** — "Let the AI build your ideal program." Color: green
 - Days per week selector (2-6, pill buttons)
 - Equipment: Full Gym / Home Gym / Bodyweight
@@ -520,59 +531,63 @@ const [lifts, setLifts] = useState({ squat: { weight: '', reps: '' }, bench: { w
 ## 7.4 Home Screen
 **File**: `app/(tabs)/index.tsx`
 
-This is the most important screen. It answers: "What should I do today?"
+This is the most important screen. Layout and behavior depend on **selected date** (today, past, or future).
 
-### Layout (ScrollView):
+### Layout (ScrollView)
 
-**Top bar**:
-- "PUMPED" logo (left)
-- Streak badge pill (right): "5 Day Streak" with fire emoji
+**Weekly Calendar Strip** (top):
+- Horizontal row: current week (Sun–Sat). Each day shows day abbreviation, date number.
+- Tappable: any day (today, past, future) updates `selectedDate`.
+- Selected day: pill/highlight background. Today: border highlight.
+- **Green dot** under date **only** when that day has logged activity (workout, rest, or cardio) **and** the day is not in the future. No dot on future dates.
+- State: `selectedDate`, `activityDaysThisWeek` (dates with any completed session).
 
-**Today's Recommendation Card** (prominent, tappable):
-- Label: "TODAY'S WORKOUT" (small, green, uppercase)
-- Workout name: "Upper Body - Push" (20pt, bold)
-- Meta: "6 exercises - ~55 min - PPL" (13pt, secondary)
-- Green play button (right side)
-- Tap -> navigates to workout/preview
-- Below card: small text link "or log a custom workout" -> workout/custom
+**Welcome / Date Line**:
+- Single line for all days: **`format(selectedDate, 'EEEE, MMM d')`** (e.g. "Tuesday, Mar 10"). No "Welcome, username" — date only.
+- Subtext below: "Scheduled" (future), "Rest day — recover and grow" (today rest), "X day scheduled" (today lift), "Workout completed" / "X workouts completed" (past with sessions), "No workout logged" (past without), or "Rest day" (past rest).
 
-**Strength Score Card**:
-- "STRENGTH SCORE" label
-- Large number (e.g., "1,105") (42pt, extrabold)
-- Breakdown: Squat 365 | Bench 275 | Deadlift 465
-- Small change indicator: "+12 this week" (green pill)
-- If no data yet: "Log your first squat, bench, or deadlift to see your score"
+**Content by selected date**:
 
-**Muscle Readiness Card**:
-- "Muscle Readiness" header + legend (green/yellow/red dots)
-- BodyMap SVG (front + back, side by side)
-- Tap any muscle -> bottom sheet with:
-  - Muscle name
-  - Recovery % (large, colored)
-  - Last trained date
-  - "Ready to train" / "Needs rest" / "Recovering" status text
+- **Future day**: One card only — "SCHEDULED" badge, workout type from `getWorkoutTypeForDate` (e.g. Push, Pull, Rest → "Active Recovery Day"). No actions. Body map empty. No quick stats.
+- **Today, no workouts logged yet**: AI workout card (SCHEDULED badge, plan name or "Generate Today's Workout", View/Generate button, Speed Log button). Rest day variant: Active Recovery card with Customize Cardio, Log Rest Day, Log Cardio, Speed Log (all same button style).
+- **Today, at least one workout logged**: AI card hidden. Speed Log button at top, then list of today's sessions (each with View Workout → history/[id]).
+- **Past day, with sessions**: Speed Log button at top, then one card per session (name, date + time, View Workout). Sessions exclude rest-day entries when there is any workout/cardio that day (rest overridden by workout).
+- **Past day, no sessions**: Speed Log button at top, then "No workout logged" card.
 
-**Quick Stats Row** (3 small cards):
-- Total Workouts: 24
-- This Week: 4/5
-- PRs This Month: 3
+**Muscle Readiness**:
+- Label: "MUSCLE READINESS" + optional " · MMM d" (or " · Future" for future).
+- **Today**: `fatigueMap` from `useFatigue()` (refreshed on focus via `refreshFatigue()`).
+- **Past**: `historicalFatigueMap` from `getHistoricalFatigueMap(userId, selectedDate)` (recomputed from all sessions up to that date).
+- **Future**: empty array (no data).
+- MuscleDetailSheet receives the **same** map (today / historical / empty) so percentages and "Last trained" match the selected day.
 
-### State
+**Quick Stats** (Workouts, Streak, This Week):
+- Shown **only when selected date is today**. Hidden for past and future.
+
+**This Week's Plan (RoutineTimeline)**:
+- **File**: `components/home/RoutineTimeline.tsx`.
+- Horizontal timeline: 7 nodes Mon–Sun (`weekStartsOn: 1`). Each node: day letter (M,T,W…), circle, type label from `getWorkoutTypeForDate(programStyle, date, trainingFrequency)` — **same logic as future-day card** so labels stay in sync.
+- **Only today's node** is filled green (accent). Other days: outline circle; **checkmark inside only for past days that were logged** (no check on future).
+- Uses `utils/schedule.ts`: `getWorkoutTypeForDate`, `getWorkoutDayIndices`. Schedule driven by `profile.program_style` and `profile.training_frequency`.
+- Card has `marginTop: spacing.xxl` so it sits below the stats row without collision.
+
+**Speed Log and date**:
+- Every Speed Log entry point from this screen passes **selected date**: `router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })`.
+- Speed Log editor uses that date when creating the session so logging on a past day saves to that day. When no param, uses **local today** via `getLocalDateString()` (see Date handling below).
+
+### State (key)
 ```typescript
-const { profile } = useProfile();
+const [selectedDate, setSelectedDate] = useState(new Date());
+const [sessionsForSelectedDate, setSessionsForSelectedDate] = useState<SessionForDate[]>([]);
+const [activityDaysThisWeek, setActivityDaysThisWeek] = useState<string[]>([]);
 const { fatigueMap, refreshFatigue } = useFatigue();
-const { todayPlan, loading: planLoading, regenerate } = useTodayPlan();
-const { score, squat, bench, deadlift } = useStrength();
-const { streak } = useStreak();
-const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
+const [historicalFatigueMap, setHistoricalFatigueMap] = useState(...);
+// profile, cachedPlan, workoutDaysThisWeek, restDaysThisWeek, etc.
 ```
 
-### Data Loading
-On screen focus:
-1. Fetch profile (for streak, total workouts)
-2. Fetch fatigue map (14 muscle groups with recovery %)
-3. Fetch today's AI plan (from ai_workout_plans table, or generate if none exists)
-4. Fetch latest e1RMs (from profile)
+### Data loading
+- On focus (`useFocusEffect`): `fetchSessionsForDate(selectedDate)`, `fetchWeekWorkouts()`, `refreshFatigue()`.
+- When `selectedDate` changes: fetch sessions for that date; if past (not today, not future), fetch `getHistoricalFatigueMap` for that date.
 
 ---
 
@@ -848,13 +863,9 @@ const PROGRAM_TEMPLATES = {
     rotation: ['upper', 'lower', 'rest', 'upper', 'lower', 'rest', 'rest'],
     description: 'Upper/Lower split',
   },
-  bro_split: {
-    rotation: ['chest_tris', 'back_bis', 'shoulders', 'legs', 'arms', 'rest', 'rest'],
-    description: 'Classic bro split',
-  },
-  full_body: {
-    rotation: ['full', 'rest', 'full', 'rest', 'full', 'rest', 'rest'],
-    description: 'Full body 3x/week',
+  aesthetic: {
+    rotation: null,
+    description: 'AI-optimized for aesthetics',
   },
   ai_optimal: {
     rotation: null,  // AI decides based on fatigue
@@ -1041,7 +1052,7 @@ All tables have Row Level Security so users can only access their own data.
 ```
 Build the 3-step onboarding screen at app/(auth)/onboarding.tsx.
 Step 1: gender (3 buttons), age, height, weight inputs.
-Step 2: program style (5 cards: PPL purple, Upper/Lower blue, Bro Split orange, Full Body pink, AI green), days/week selector (pill buttons), equipment selector.
+Step 2: program style (4 cards: PPL purple, Upper/Lower blue, Aesthetic pink, AI Optimal green), days/week selector (pill buttons), equipment selector.
 Step 3: optional quick strength log (squat/bench/deadlift weight+reps).
 Progress bar shows 3 steps. On completion, save to Supabase profiles table, initialize fatigue at 100% for all 14 muscles, calculate e1RMs if entered, navigate to home.
 Dark theme, cards with 1px border, green accent on selections.
@@ -1115,6 +1126,56 @@ Client calls this via supabase.functions.invoke('generate-workout').
 | 13 | Polish: animations, haptics, offline sync, error states | 2 |
 | 14 | Testing + bug fixes | 2 |
 | **Total** | | **~3 weeks** |
+
+---
+
+# IMPLEMENTATION STATUS (Agent Handoff — March 2026)
+
+Use this section so an agentic IDE can pick up exactly where development left off.
+
+## Program styles (only 4)
+- **Valid values**: `ppl`, `upper_lower`, `aesthetic`, `ai_optimal`. No `bro_split` or `full_body`.
+- Migration `008_program_style_four_only.sql` migrates existing profiles and enforces the CHECK.
+
+## Date handling (timezone-safe)
+- **Session date when logging**: Use `getLocalDateString()` from `utils/date.ts` so the stored date is the user's **local calendar day**, not UTC. Used in: `app/workout/log.tsx`, `app/workout/custom.tsx`, `app/speedlog/editor.tsx`, `app/cardio/log.tsx`.
+- **Displaying dates**: Use `parseLocalDate(dateStr)` from `utils/date.ts` when formatting `workout_sessions.date` (e.g. in Past Workouts, history detail). Avoid `new Date(dateStr)` for `yyyy-MM-dd` — it parses as UTC midnight and shifts in some timezones.
+- **Speed Log for a specific day**: Home screen passes `logForDate: format(selectedDate, 'yyyy-MM-dd')`; editor reads it and uses that date for the created session.
+
+## Schedule and RoutineTimeline
+- **Shared logic**: `utils/schedule.ts` — `getWorkoutDayIndices(trainingFrequency)`, `getWorkoutTypeForDate(programStyle, date, trainingFrequency)`.
+- **RoutineTimeline**: `components/home/RoutineTimeline.tsx`. Week starts Monday (`startOfWeek(..., { weekStartsOn: 1 })`). Today's node only is filled green; checkmarks only on **past** logged days (`isPast && wasLogged`).
+
+## Past Workouts (Workouts tab)
+- **File**: `app/(tabs)/workouts.tsx`. Fetches completed sessions (e.g. limit 500), **excludes** rows where `is_rest_day === true` so only real workouts/cardio appear. Rendered with `.map()` inside ScrollView (no nested VirtualizedList).
+- **Date display**: `format(parseLocalDate(w.date), 'MMM d')`.
+
+## Workout names
+- **AI-generated name**: When the user does not set a name (or uses a generic placeholder), use `generateWorkoutNameFromExercises(exercises)` from `utils/workoutName.ts` and save that as `session.name`. Used in `app/workout/log.tsx` and `app/speedlog/editor.tsx`.
+
+## Multiple sessions per day
+- Home screen and history support **multiple** completed sessions per calendar day. `sessionsForSelectedDate` is an array; each gets a card with "View Workout". If user logged rest day then a workout on the same day, only the workout appears in Past Workouts (rest overridden).
+
+## Duration input
+- **Component**: `components/ui/DurationInput.tsx` — two text fields (Hours, Minutes). Replaces the wheel-based DurationPicker in workout log and Speed Log editor.
+
+## Muscle fatigue and historical view
+- **Today**: `fatigueMap` from `useFatigue()`; `refreshFatigue()` on screen focus.
+- **Past day**: `getHistoricalFatigueMap(userId, selectedDate)` in `services/fatigue.ts` recomputes recovery from all sessions/set_logs up to that date. BodyMap and MuscleDetailSheet use this map when a past day is selected.
+- **Future day**: Body map and detail sheet receive empty map.
+
+## Key file reference
+| Purpose | Path |
+|--------|------|
+| Home / Today | `app/(tabs)/index.tsx` |
+| Workouts tab (Past Workouts) | `app/(tabs)/workouts.tsx` |
+| Session detail | `app/history/[id].tsx` |
+| Speed Log entry, editor | `app/speedlog/index.tsx`, `app/speedlog/editor.tsx` |
+| Schedule logic | `utils/schedule.ts` |
+| Date parsing/formatting | `utils/date.ts` |
+| Workout name from exercises | `utils/workoutName.ts` |
+| Historical fatigue | `services/fatigue.ts` → `getHistoricalFatigueMap` |
+| Streak | `services/streak.ts` → `calculateStreak`, `updateProfileStreak` |
 
 ---
 
