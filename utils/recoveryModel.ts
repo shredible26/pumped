@@ -75,7 +75,7 @@ export function calculateMuscleStrain(
 
   for (const set of setsForThisMuscle) {
     const volumeLoad = set.weight * set.reps;
-    const movementMultiplier = MOVEMENT_STRAIN_MULTIPLIER[set.exerciseMovementPattern] ?? 1.0;
+    const movementMultiplier = MOVEMENT_STRAIN_MULTIPLIER[set.exerciseMovementPattern] ?? 0.8;
     const targetMultiplier = set.isPrimaryMuscle ? 1.0 : 0.4;
     const repFatigueFactor = set.reps <= 5 ? 0.8 : set.reps <= 8 ? 1.0 : set.reps <= 12 ? 1.15 : 1.3;
     const fiberSusceptibility = 0.7 + props.fastTwitchPct * 0.6;

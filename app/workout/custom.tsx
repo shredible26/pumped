@@ -240,7 +240,6 @@ export default function CustomWorkoutScreen() {
 
       <View style={styles.footer}>
         <Pressable style={styles.addButton} onPress={() => setSearchOpen(true)}>
-          <Ionicons name="add" size={20} color={colors.accent.primary} />
           <Text style={styles.addButtonText}>Add Exercise</Text>
         </Pressable>
 
@@ -263,8 +262,15 @@ export default function CustomWorkoutScreen() {
       <Modal visible={searchOpen} animationType="slide" onRequestClose={() => setSearchOpen(false)}>
         <SafeAreaView style={styles.searchContainer}>
           <View style={styles.searchHeader}>
-            <Pressable onPress={() => { setSearchOpen(false); setSearchQuery(''); }}>
-              <Ionicons name="close" size={24} color={colors.text.primary} />
+            <Pressable
+              style={styles.searchBackButton}
+              onPress={() => {
+                setSearchOpen(false);
+                setSearchQuery('');
+              }}
+            >
+              <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+              <Text style={styles.searchBackText}>Back</Text>
             </Pressable>
             <Text style={styles.searchTitle}>Add Exercise</Text>
             <View style={{ width: 24 }} />
@@ -499,6 +505,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
+  },
+  searchBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  searchBackText: {
+    fontSize: font.sm,
+    color: colors.text.primary,
+    fontWeight: '600',
   },
   searchTitle: {
     fontSize: font.xl,

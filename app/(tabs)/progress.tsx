@@ -113,25 +113,24 @@ export default function ProgressScreen() {
       >
         <Text style={styles.title}>Progress</Text>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.pillStrip}
-          contentContainerStyle={{ gap: spacing.sm }}
-        >
-          <View style={styles.statPill}>
-            <Text style={styles.statPillValue}>{totalWorkouts}</Text>
-            <Text style={styles.statPillLabel}>workouts</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{totalWorkouts}</Text>
+            <Text style={styles.statLabel}>Workouts</Text>
           </View>
-          <View style={styles.statPill}>
-            <Text style={styles.statPillValue}>{streak}</Text>
-            <Text style={styles.statPillLabel}>day streak</Text>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{streak > 0 ? `🔥 ${streak}` : '0'}</Text>
+            <Text style={styles.statLabel}>Streak</Text>
           </View>
-          <View style={styles.statPill}>
-            <Text style={styles.statPillValue}>{formatVolumeWithUnit(volumeData.total, units).replace(` ${units}`, '')}</Text>
-            <Text style={styles.statPillLabel}>{units} total</Text>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>
+              {formatVolumeWithUnit(volumeData.total, units).replace(` ${units}`, '')}
+            </Text>
+            <Text style={styles.statLabel}>
+              {units === 'lbs' ? 'Lbs total' : 'Kg total'}
+            </Text>
           </View>
-        </ScrollView>
+        </View>
 
         {/* Insights */}
         <Text style={styles.sectionHeader}>
@@ -415,25 +414,29 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.md,
   },
-  statPill: {
+  statsRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  statCard: {
+    flex: 1,
     backgroundColor: colors.bg.card,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.xl,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border.default,
   },
-  statPillValue: {
-    fontSize: font.lg,
+  statNumber: {
+    fontSize: font.xl,
     fontWeight: '700',
     color: colors.text.primary,
   },
-  statPillLabel: {
-    fontSize: font.sm,
+  statLabel: {
+    fontSize: font.xs,
     color: colors.text.secondary,
+    marginTop: spacing.xs,
   },
   sectionHeader: {
     fontSize: font.lg,

@@ -50,8 +50,9 @@ export default function SpeedLogTypeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Ionicons name="close" size={24} color={colors.text.primary} />
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+          <Text style={styles.backButtonText}>Back</Text>
         </Pressable>
         <Text style={styles.headerTitle}>Speed Log</Text>
         <View style={{ width: 24 }} />
@@ -60,8 +61,8 @@ export default function SpeedLogTypeScreen() {
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
         <Text style={styles.subtitle}>What did you work on?</Text>
 
-        {/* Scheduled / recommended */}
-        <Text style={styles.sectionLabel}>SCHEDULED</Text>
+        {/* Split types: scheduled first, then the rest */}
+        <Text style={styles.sectionLabel}>YOUR SPLIT</Text>
         <Pressable
           style={styles.recommendedCard}
           onPress={() => selectType(recommended)}
@@ -71,35 +72,30 @@ export default function SpeedLogTypeScreen() {
             <Text style={styles.recommendedText}>{recommended}</Text>
           </View>
           <View style={styles.bestMatchBadge}>
-            <Text style={styles.bestMatchText}>BEST MATCH</Text>
+            <Text style={styles.bestMatchText}>SCHEDULED</Text>
           </View>
         </Pressable>
 
-        {/* Other split types */}
-        {otherTypes.length > 0 && (
-          <>
-            <Text style={styles.sectionLabel}>YOUR SPLIT</Text>
-            {otherTypes.map((type) => (
-              <Pressable
-                key={type}
-                style={styles.typeCard}
-                onPress={() => selectType(type)}
-              >
-                <Ionicons
-                  name="barbell-outline"
-                  size={18}
-                  color={colors.text.secondary}
-                />
-                <Text style={styles.typeText}>{type}</Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={16}
-                  color={colors.text.tertiary}
-                />
-              </Pressable>
-            ))}
-          </>
-        )}
+        {otherTypes.length > 0 &&
+          otherTypes.map((type) => (
+            <Pressable
+              key={type}
+              style={styles.typeCard}
+              onPress={() => selectType(type)}
+            >
+              <Ionicons
+                name="barbell-outline"
+                size={18}
+                color={colors.text.secondary}
+              />
+              <Text style={styles.typeText}>{type}</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color={colors.text.tertiary}
+              />
+            </Pressable>
+          ))}
 
         {/* Muscle group pills */}
         <Text style={styles.sectionLabel}>OR PICK A MUSCLE GROUP</Text>
@@ -150,6 +146,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
   },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  backButtonText: {
+    fontSize: font.sm,
+    color: colors.text.primary,
+    fontWeight: '600',
+  },
   headerTitle: {
     fontSize: font.xl,
     fontWeight: '700',
@@ -182,6 +188,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.accent.border,
+    marginBottom: spacing.sm,
   },
   recommendedLeft: {
     flexDirection: 'row',

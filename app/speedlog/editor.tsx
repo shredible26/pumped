@@ -206,7 +206,7 @@ export default function SpeedLogEditorScreen() {
                 name: e.exercise.name,
               }))
             ) || `${type || 'Custom'} Workout`;
-      const sessionDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      const sessionDate = dateParam && /^\d{4}-\d{2}-\d2}$/.test(dateParam)
         ? dateParam
         : getLocalDateString();
       const ws = await createSession({
@@ -342,7 +342,6 @@ export default function SpeedLogEditorScreen() {
           </View>
         )}
 
-        {/* Duration */}
         <View style={styles.durationRow}>
           <Ionicons name="time-outline" size={18} color={colors.text.secondary} />
           <Text style={styles.durationLabel}>Duration</Text>
@@ -354,7 +353,6 @@ export default function SpeedLogEditorScreen() {
           </View>
         </View>
 
-        {/* Exercise cards */}
         {exercises.map((ex, exIdx) => (
           <View key={ex.exercise.id} style={styles.exerciseCard}>
             <View style={styles.exerciseHeader}>
@@ -400,7 +398,6 @@ export default function SpeedLogEditorScreen() {
         </Pressable>
       </ScrollView>
 
-      {/* Footer summary */}
       {exercises.length > 0 && (
         <View style={styles.footer}>
           <Text style={styles.footerSummary}>
@@ -424,78 +421,78 @@ export default function SpeedLogEditorScreen() {
         </View>
       )}
 
-      {/* Edit set inline modal */}
-      <Modal
-        visible={!!editingSet}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditingSet(null)}
-      >
-        <Pressable style={styles.editOverlay} onPress={() => setEditingSet(null)}>
-          <View style={styles.editSheet}>
-            <Pressable>
-              <Text style={styles.editTitle}>Edit Set</Text>
-              <View style={styles.editRow}>
-                {editingSet && showWeightInput(exercises[editingSet.exIdx]?.exercise?.equipment) && (
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.editLabel}>Weight (lbs)</Text>
-                    <TextInput
-                      style={styles.editInput}
-                      value={editWeight}
-                      onChangeText={setEditWeight}
-                      keyboardType="numeric"
-                      selectTextOnFocus
-                    />
-                  </View>
-                )}
-                {editingSet && showSecondsInput(exercises[editingSet.exIdx]?.exercise?.equipment, exercises[editingSet.exIdx]?.exercise?.name) ? (
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.editLabel}>Seconds</Text>
-                    <TextInput
-                      style={styles.editInput}
-                      value={editSeconds}
-                      onChangeText={setEditSeconds}
-                      keyboardType="numeric"
-                      placeholder="sec"
-                      selectTextOnFocus
-                    />
-                  </View>
-                ) : (
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.editLabel}>Reps</Text>
-                    <TextInput
-                      style={styles.editInput}
-                      value={editReps}
-                      onChangeText={setEditReps}
-                      keyboardType="numeric"
-                      selectTextOnFocus
-                    />
-                  </View>
-                )}
-              </View>
-              <View style={styles.editActionsRow}>
-                <Pressable
-                  style={styles.deleteSetBtn}
-                  onPress={() => {
-                    if (editingSet) {
-                      removeSet(editingSet.exIdx, editingSet.setIdx);
-                      setEditingSet(null);
-                    }
-                  }}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.text.inverse} />
-                  <Text style={styles.deleteSetText}>Delete Set</Text>
-                </Pressable>
-                <Pressable style={styles.editOkBtn} onPress={confirmEditSet}>
-                  <Text style={styles.editOkText}>OK</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+      {editingSet && (
+        <Modal
+          visible={!!editingSet}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setEditingSet(null)}
+        >
+          <Pressable style={styles.editOverlay} onPress={() => setEditingSet(null)}>
+            <View style={styles.editSheet}>
+              <Pressable>
+                <Text style={styles.editTitle}>Edit Set</Text>
+                <View style={styles.editRow}>
+                  {editingSet && showWeightInput(exercises[editingSet.exIdx]?.exercise?.equipment) && (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editLabel}>Weight (lbs)</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editWeight}
+                        onChangeText={setEditWeight}
+                        keyboardType="numeric"
+                        selectTextOnFocus
+                      />
+                    </View>
+                  )}
+                  {editingSet && showSecondsInput(exercises[editingSet.exIdx]?.exercise?.equipment, exercises[editingSet.exIdx]?.exercise?.name) ? (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editLabel}>Seconds</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editSeconds}
+                        onChangeText={setEditSeconds}
+                        keyboardType="numeric"
+                        placeholder="sec"
+                        selectTextOnFocus
+                      />
+                    </View>
+                  ) : (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editLabel}>Reps</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editReps}
+                        onChangeText={setEditReps}
+                        keyboardType="numeric"
+                        selectTextOnFocus
+                      />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.editActionsRow}>
+                  <Pressable
+                    style={styles.deleteSetBtn}
+                    onPress={() => {
+                      if (editingSet) {
+                        removeSet(editingSet.exIdx, editingSet.setIdx);
+                        setEditingSet(null);
+                      }
+                    }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.text.inverse} />
+                    <Text style={styles.deleteSetText}>Delete Set</Text>
+                  </Pressable>
+                  <Pressable style={styles.editOkBtn} onPress={confirmEditSet}>
+                    <Text style={styles.editOkText}>OK</Text>
+                  </Pressable>
+                </View>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
 
-      {/* Exercise search modal */}
       <Modal visible={searchOpen} animationType="slide" onRequestClose={() => setSearchOpen(false)}>
         <SafeAreaView style={styles.searchContainer}>
           <View style={styles.searchHeader}>
@@ -527,7 +524,7 @@ export default function SpeedLogEditorScreen() {
                     return (
                       <Pressable
                         key={ex.id}
-                        style={[styles.searchItem, added && { opacity: 0.4 }]}
+                        style={styles.searchItem}
                         onPress={() => addExercise(ex)}
                         disabled={added}
                       >
@@ -787,3 +784,4 @@ const styles = StyleSheet.create({
   searchItemName: { fontSize: font.md, fontWeight: '600', color: colors.text.primary },
   searchItemMeta: { fontSize: font.sm, color: colors.text.secondary, marginTop: 1 },
 });
+

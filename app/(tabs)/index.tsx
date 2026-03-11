@@ -324,10 +324,9 @@ export default function TodayScreen() {
           <Text style={styles.welcomeText}>
             {format(selectedDate, 'EEEE, MMM d')}
           </Text>
-          <Text style={styles.welcomeSubtext}>
-            {isSelectedFuture
-              ? 'Scheduled'
-              : isSelectedToday
+          {!isSelectedFuture && (
+            <Text style={styles.welcomeSubtext}>
+              {isSelectedToday
                 ? isRestDay
                   ? 'Rest day — recover and grow'
                   : `${todayType} day scheduled`
@@ -338,7 +337,8 @@ export default function TodayScreen() {
                   : selectedDateType === 'Rest'
                     ? 'Rest day'
                     : 'No workout logged'}
-          </Text>
+            </Text>
+          )}
         </View>
 
         {/* Future day: only scheduled workout name, no actions */}
@@ -364,7 +364,6 @@ export default function TodayScreen() {
         {/* Today + workout(s) already logged: show list of sessions (like past day), no AI card */}
         {isSelectedToday && !isRestDay && sessionsForSelectedDate.length > 0 && (
           <View style={styles.pastSessionsContainer}>
-            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             <Pressable
               style={styles.speedLogButtonStandalone}
               onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
@@ -372,6 +371,7 @@ export default function TodayScreen() {
               <Ionicons name="flash" size={18} color={colors.text.primary} />
               <Text style={styles.speedLogButtonText}>Speed Log</Text>
             </Pressable>
+            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             {sessionsForSelectedDate.map((sess) => (
               <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
                 <View style={styles.workoutCardHeader}>
@@ -379,7 +379,13 @@ export default function TodayScreen() {
                     <Ionicons name="barbell" size={18} color={colors.accent.primary} />
                   </View>
                 </View>
-                <Text style={styles.workoutType}>{sess.name}</Text>
+            <Text
+              style={styles.workoutType}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {sess.name}
+            </Text>
                 <Text style={styles.programName}>
                   {format(selectedDate, 'MMM d, yyyy')}
                   {sess.completed_at
@@ -516,7 +522,13 @@ export default function TodayScreen() {
                         <Ionicons name="barbell" size={18} color={colors.accent.primary} />
                       </View>
                     </View>
-                    <Text style={styles.workoutType}>{sess.name}</Text>
+                    <Text
+                      style={styles.workoutType}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {sess.name}
+                    </Text>
                     <Text style={styles.programName}>
                       {format(selectedDate, 'MMM d, yyyy')}
                       {sess.completed_at
@@ -554,7 +566,13 @@ export default function TodayScreen() {
                     <Ionicons name="barbell" size={18} color={colors.accent.primary} />
                   </View>
                 </View>
-                <Text style={styles.workoutType}>{sess.name}</Text>
+                <Text
+                  style={styles.workoutType}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {sess.name}
+                </Text>
                 <Text style={styles.programName}>
                   {format(selectedDate, 'MMM d, yyyy')}
                   {sess.completed_at
@@ -792,8 +810,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   workoutType: {
-    fontSize: font.xxxl,
-    fontWeight: '800',
+    fontSize: font.lg,
+    fontWeight: '700',
     color: colors.text.primary,
   },
   programRow: {
@@ -816,15 +834,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.accent.primary,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
-    marginTop: spacing.xl,
+    marginTop: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    backgroundColor: 'transparent',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
   },
   startButtonText: {
-    color: colors.text.inverse,
-    fontSize: font.lg,
-    fontWeight: '700',
+    color: colors.text.primary,
+    fontSize: font.md,
+    fontWeight: '600',
   },
   speedLogButton: {
     flexDirection: 'row',

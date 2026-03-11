@@ -20,14 +20,14 @@ function filterExercisesByEquipment(
   }
 
   if (access === "home_gym") {
-    const allowed = new Set(["barbell", "dumbbell", "bodyweight", "kettlebell"]);
+    const allowed = new Set(["barbell", "dumbbell", "bodyweight", "kettlebell", "band"]);
     return exercises.filter((e) => allowed.has(String(e.equipment || "").toLowerCase()));
   }
 
   const sorted = [...exercises].sort((a, b) =>
     String(a.name || "").localeCompare(String(b.name || ""))
   );
-  return sorted.slice(0, 80);
+  return sorted.slice(0, 350);
 }
 
 function parseWorkoutJson(aiText: string): any {

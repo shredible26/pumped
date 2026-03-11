@@ -404,8 +404,8 @@ export default function WorkoutLogScreen() {
                   </Pressable>
                 );
               })}
-              <Pressable style={styles.addSetPill} onPress={() => addSet(exIdx)}>
-                <Ionicons name="add" size={16} color={colors.accent.primary} />
+              <Pressable style={styles.addSetButton} onPress={() => addSet(exIdx)}>
+                <Text style={styles.addSetButtonText}>Add</Text>
               </Pressable>
             </View>
           </View>
@@ -415,7 +415,6 @@ export default function WorkoutLogScreen() {
           style={styles.addExerciseBtn}
           onPress={() => setSearchOpen(true)}
         >
-          <Ionicons name="add" size={20} color={colors.accent.primary} />
           <Text style={styles.addExerciseText}>Add Exercise</Text>
         </Pressable>
       </ScrollView>
@@ -533,8 +532,12 @@ export default function WorkoutLogScreen() {
       >
         <SafeAreaView style={styles.searchContainer}>
           <View style={styles.searchHeader}>
-            <Pressable onPress={() => setSearchOpen(false)}>
-              <Ionicons name="close" size={24} color={colors.text.primary} />
+            <Pressable
+              style={styles.searchBackButton}
+              onPress={() => setSearchOpen(false)}
+            >
+              <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+              <Text style={styles.searchBackText}>Back</Text>
             </Pressable>
             <Text style={styles.searchTitle}>Add Exercise</Text>
             <View style={{ width: 24 }} />
@@ -735,6 +738,21 @@ const styles = StyleSheet.create({
     fontSize: font.lg,
     fontWeight: '700',
   },
+  addSetButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    marginLeft: spacing.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addSetButtonText: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.accent.primary,
+  },
   editOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -790,6 +808,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: spacing.xl,
+  },
+  searchBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  searchBackText: {
+    fontSize: font.sm,
+    color: colors.text.primary,
+    fontWeight: '600',
   },
   searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
   searchInput: {

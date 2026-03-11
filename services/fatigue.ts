@@ -260,9 +260,17 @@ export async function getHistoricalFatigueMap(
   }));
 }
 
+/** Nominal weight (lbs) used for bodyweight sets so they contribute to strain/readiness. */
+const BODYWEIGHT_NOMINAL_LBS = 50;
+/** Nominal weight (lbs) and rep-equivalent for time-under-tension (e.g. 60s plank ≈ 4 reps at 25 lbs). */
+const TIME_BASED_NOMINAL_LBS = 25;
+const TIME_BASED_SECONDS_PER_REP = 15;
+
 /**
  * Record strain per muscle for a completed workout into muscle_strain_log.
  * Call after set_logs are saved and session is completed.
+ * Handles weighted sets, bodyweight sets (reps only), and time-based sets (actual_seconds) so
+ * every exercise type from the DB affects the Muscle Readiness map accurately.
  */
 export async function recordWorkoutStrain(
   userId: string,
@@ -290,9 +298,25 @@ export async function recordWorkoutStrain(
     const ex = exMap.get(set.exercise_id);
     if (!ex) continue;
 
-    const weight = Number(set.actual_weight) || 0;
-    const reps = Number(set.actual_reps) || 0;
-    if (weight <= 0 || reps <= 0) continue;
+    const rawWeight = Number(set.actual_weight) ?? 0;
+    const rawReps = Number(set.actual_reps) ?? 0;
+    const seconds = Number((set as any).actual_seconds) ?? 0;
+
+    let weight: number;
+    let reps: number;
+
+    if (seconds > 0) {
+      weight = TIME_BASED_NOMINAL_LBS;
+      reps = Math.max(1, Math.ceil(seconds / TIME_BASED_SECONDS_PER_REP));
+    } else if (rawWeight > 0 && rawReps > 0) {
+      weight = rawWeight;
+      reps = rawReps;
+    } else if (rawWeight === 0 && rawReps > 0) {
+      weight = BODYWEIGHT_NOMINAL_LBS;
+      reps = rawReps;
+    } else {
+      continue;
+    }
 
     const movementPattern = (ex.movement_pattern as string) || 'isolation';
     const primary = (ex.primary_muscle as string)?.toLowerCase?.();
@@ -323,6 +347,8 @@ export async function recordWorkoutStrain(
   const completedAtIso = completedAt.toISOString();
 
   for (const [muscle_group, sets] of Object.entries(muscleSetData)) {
+    if (muscle_group === 'cardio') continue;
+
     const strain_score = calculateMuscleStrain(muscle_group, sets);
     const total_volume = sets.reduce((sum, s) => sum + s.weight * s.reps, 0);
     const exercise_count = new Set(sets.map((s) => s.exerciseId).filter(Boolean)).size;
