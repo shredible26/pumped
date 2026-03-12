@@ -258,11 +258,18 @@ export async function generateSuggestions(userId: string): Promise<string[]> {
   }
 
   const workoutDates = new Set((sessions as any[]).filter((s) => !s.is_rest_day).map((s) => s.date));
-  const avgPerWeek = workoutDates.size / 4.3;
+  const workoutCount = workoutDates.size;
+  const avgPerWeek = workoutCount / 4.3;
 
-  if (avgPerWeek < targetDays) {
+  // Consistency suggestion: avoid useless "0.7 workouts" for new users; use encouraging, actionable copy
+  if (workoutCount >= 8 && avgPerWeek < targetDays) {
+    const avgRounded = avgPerWeek >= 1 ? avgPerWeek.toFixed(1) : 'under 1';
     suggestions.push(
-      `Based on your Progress data, you're averaging ${avgPerWeek.toFixed(1)} workouts per week this month while your target is ${targetDays}. Try scheduling your next session for today or tomorrow to close the gap.`
+      `You're averaging ${avgRounded} workouts per week this month (target: ${targetDays}). Try adding a session this week — even a short one helps build the habit.`
+    );
+  } else if (workoutCount >= 3 && workoutCount < 8 && avgPerWeek < targetDays) {
+    suggestions.push(
+      `You've logged ${workoutCount} workouts this month. Your goal is ${targetDays} per week — try to add one more session this week to get closer.`
     );
   }
   if (streak >= 3 && streak < 7) {
@@ -323,6 +330,15 @@ export async function generateSuggestions(userId: string): Promise<string[]> {
         `${secondLabel} is also getting relatively low volume. Try incorporating ${examples} into your next few sessions.`
       );
     }
+  }
+
+  // One evergreen tip for new users so suggestions feel useful from the start
+  if (suggestions.length < 5) {
+    const tip =
+      workoutCount <= 8
+        ? 'Use the Muscle Readiness map on the Today tab to see which muscles are recovered and plan your next workout.'
+        : 'Speed Log lets you record a workout in seconds without a plan — great for busy days.';
+    suggestions.push(tip);
   }
 
   return suggestions.slice(0, 5);

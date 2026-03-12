@@ -200,11 +200,21 @@ export default function TodayScreen() {
     return () => { cancelled = true; };
   }, [selectedDate, session?.user?.id]);
 
+  const REFRESH_TIMEOUT_MS = 15000;
   const onRefresh = useCallback(async () => {
+    if (!session?.user?.id) return;
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  }, [loadData]);
+    try {
+      await Promise.race([
+        loadData(),
+        new Promise<void>((resolve) => setTimeout(resolve, REFRESH_TIMEOUT_MS)),
+      ]);
+    } catch {
+      // Avoid refresh errors (e.g. network) from breaking the screen
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadData, session?.user?.id]);
 
   const handleSelectMuscle = useCallback((muscle: string) => {
     setSelectedMuscle(muscle);
