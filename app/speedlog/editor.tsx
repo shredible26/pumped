@@ -63,7 +63,6 @@ export default function SpeedLogEditorScreen() {
   const [editWeight, setEditWeight] = useState('');
   const [editReps, setEditReps] = useState('');
   const [editSeconds, setEditSeconds] = useState('');
-  const [showFirstTimeWarning, setShowFirstTimeWarning] = useState(true);
 
   useEffect(() => {
     loadExercises();
@@ -333,15 +332,6 @@ export default function SpeedLogEditorScreen() {
           </View>
         </View>
 
-        {showFirstTimeWarning && exercises.length === 0 && (
-          <View style={styles.warningBanner}>
-            <Ionicons name="information-circle" size={18} color="#FACC15" />
-            <Text style={styles.warningText}>
-              No history for {type} yet. Add exercises and the more you log, the smarter Speed Log gets.
-            </Text>
-          </View>
-        )}
-
         <View style={styles.durationRow}>
           <Ionicons name="time-outline" size={18} color={colors.text.secondary} />
           <Text style={styles.durationLabel}>Duration</Text>
@@ -585,18 +575,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
   },
   newBadgeText: { fontSize: 9, fontWeight: '700', color: colors.accent.primary, letterSpacing: 0.5 },
-  warningBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: 'rgba(250,204,21,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(250,204,21,0.20)',
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  warningText: { flex: 1, fontSize: font.sm, color: '#FACC15', lineHeight: 18 },
   durationRow: {
     flexDirection: 'row',
     alignItems: 'center',

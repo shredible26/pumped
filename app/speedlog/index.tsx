@@ -4,10 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
-
-const MUSCLE_PILLS = [
-  'Chest', 'Back', 'Shoulders', 'Arms', 'Core', 'Legs', 'Full Body',
-];
+import { getWorkoutTypeForDate } from '@/utils/schedule';
 
 const PPL_TYPES = ['Push', 'Pull', 'Legs'];
 const UL_TYPES = ['Upper', 'Lower'];
@@ -20,15 +17,22 @@ function getSplitTypes(style: string | undefined): string[] {
       return UL_TYPES;
     case 'aesthetic':
     case 'ai_optimal':
+      return ['AI Optimal'];
     default:
       return PPL_TYPES;
   }
 }
 
-function getRecommendedType(style: string | undefined): string {
-  const dayOfWeek = new Date().getDay();
-  const types = getSplitTypes(style);
-  return types[dayOfWeek % types.length] ?? types[0];
+/** Scheduled type for a given date; display "Cardio" on rest days, "AI Optimal" for AI Workout. */
+function getRecommendedDisplayType(
+  style: string | undefined,
+  date: Date,
+  trainingFreq: number
+): string {
+  const scheduled = getWorkoutTypeForDate(style, date, trainingFreq);
+  if (scheduled === 'Rest') return 'Cardio';
+  if (scheduled === 'AI Workout') return 'AI Optimal';
+  return scheduled;
 }
 
 export default function SpeedLogTypeScreen() {
@@ -36,7 +40,11 @@ export default function SpeedLogTypeScreen() {
   const { logForDate } = useLocalSearchParams<{ logForDate?: string }>();
   const profile = useAuthStore((s) => s.profile);
   const programStyle = profile?.program_style;
-  const recommended = getRecommendedType(programStyle);
+  const trainingFreq = profile?.training_frequency ?? 4;
+  const date = logForDate
+    ? new Date(logForDate + 'T12:00:00')
+    : new Date();
+  const recommended = getRecommendedDisplayType(programStyle, date, trainingFreq);
   const allTypes = getSplitTypes(programStyle);
   const otherTypes = allTypes.filter((t) => t !== recommended);
 
@@ -44,6 +52,13 @@ export default function SpeedLogTypeScreen() {
     router.push({
       pathname: '/speedlog/editor',
       params: { type, ...(logForDate ? { date: logForDate } : {}) },
+    });
+  };
+
+  const handleLogCardio = () => {
+    router.push({
+      pathname: '/cardio/log',
+      ...(logForDate ? { params: { logForDate } } : {}),
     });
   };
 
@@ -61,7 +76,7 @@ export default function SpeedLogTypeScreen() {
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
         <Text style={styles.subtitle}>What did you work on?</Text>
 
-        {/* Split types: scheduled first, then the rest */}
+        {/* YOUR SPLIT: scheduled first, then other split options */}
         <Text style={styles.sectionLabel}>YOUR SPLIT</Text>
         <Pressable
           style={styles.recommendedCard}
@@ -97,22 +112,20 @@ export default function SpeedLogTypeScreen() {
             </Pressable>
           ))}
 
-        {/* Muscle group pills */}
-        <Text style={styles.sectionLabel}>OR PICK A MUSCLE GROUP</Text>
-        <View style={styles.pillGrid}>
-          {MUSCLE_PILLS.map((muscle) => (
-            <Pressable
-              key={muscle}
-              style={styles.musclePill}
-              onPress={() => selectType(muscle)}
-            >
-              <Text style={styles.musclePillText}>{muscle}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Text style={styles.orLabel}>OR</Text>
+
+        {/* Log Cardio */}
+        <Text style={styles.sectionLabel}>LOG CARDIO</Text>
+        <Pressable style={styles.cardioCard} onPress={handleLogCardio}>
+          <Ionicons name="bicycle" size={20} color={colors.accent.primary} />
+          <Text style={styles.cardioCardText}>Log Cardio</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.text.tertiary} />
+        </Pressable>
+
+        <Text style={styles.orLabel}>OR</Text>
 
         {/* Build your own */}
-        <Text style={styles.sectionLabel}>OR START FROM SCRATCH</Text>
+        <Text style={styles.sectionLabel}>LOG CUSTOM WORKOUT</Text>
         <Pressable
           style={styles.scratchCard}
           onPress={() => selectType('Custom')}
@@ -229,21 +242,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text.primary,
   },
-  pillGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
+  orLabel: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    marginVertical: spacing.md,
   },
-  musclePill: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderRadius: radius.xl,
+  cardioCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
     backgroundColor: colors.bg.card,
+    padding: spacing.lg,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border.default,
+    marginBottom: spacing.sm,
   },
-  musclePillText: {
-    fontSize: font.sm,
+  cardioCardText: {
+    flex: 1,
+    fontSize: font.md,
     fontWeight: '600',
     color: colors.text.primary,
   },

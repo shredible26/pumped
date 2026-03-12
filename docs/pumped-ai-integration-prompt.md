@@ -1,18 +1,40 @@
 # PUMPED — AI Workout Generation Integration
-## Cursor Prompt — Paste into Cursor
+## Cursor Prompt — Reference for Agents
 
 ---
 
-I need to add AI workout generation to the Pumped app. This involves: a Supabase Edge Function that calls the Claude API, frontend screens for the generation flow, and connecting everything together. Reference @docs/pumped-technical-spec-v2.md for database schemas and theme tokens.
+This document describes the AI workout generation flow and how it integrates with the rest of the app. Reference @docs/pumped-technical-spec-v2.md for database schemas and theme tokens, and @docs/pumped-muscle-readiness-model.md for the science-based fatigue model.
 
-IMPORTANT COST CONSTRAINTS: We are using a limited free API credit. Every API call costs money. Implement these safeguards:
-- NEVER call the AI API in a loop, useEffect, or on screen mount
-- ONLY call the API when the user explicitly taps "Generate Workout" or "Generate without modifications"
-- Cache generated workouts in the ai_workout_plans table — if a plan exists for today, show it instead of regenerating
-- Add a loading state during generation so the user can't double-tap and trigger two API calls
-- Add a "Regenerate" button that warns "This will use a generation credit" before calling the API again
-- Each API call should use max_tokens: 1500 to keep costs low
-- Use claude-sonnet-4-20250514 model (cheapest capable model)
+## CURRENT IMPLEMENTATION (handoff reference)
+
+### Muscle Readiness (fatigue input to AI)
+- The AI receives a **fatigueMap** built from the **strain-based recovery model** (see `docs/pumped-muscle-readiness-model.md`).
+- Data comes from `muscle_strain_log` and `utils/recoveryModel.ts` (`calculateCumulativeReadiness`, etc.). The frontend calls `getBodyMapReadiness(userId, date)` in `services/fatigue.ts` and passes the result as `fatigueMap` to the edge function.
+- Each muscle has `recovery_pct` (0–100, null = no data), `last_trained_at`, and optionally `last_strain_score`. The AI is instructed to avoid primary targeting of muscles below 30% recovery, use moderate volume for 30–60%, and full programming above 60%.
+
+### What the client sends to the edge function
+- **profile**: `program_style`, `experience_level`, `equipment_access`, `training_frequency`, `weight_lbs`, **`gender`** (`'male' | 'female'` from onboarding; used for suggested weights and exercise selection).
+- **fatigueMap**: Per-muscle readiness from the strain-based model (see above).
+- **recentHistory**: Last 7–14 days of completed sessions (date, name, total_volume).
+- **exercises**: Filtered by equipment; each has `id`, `name`, `primary_muscle`, `equipment`, `difficulty`.
+- **modifications**: Optional user text (injuries, time limits, etc.).
+
+### Gender in AI generation
+- Onboarding "About You" collects **Gender** as **Male** or **Female** only (no "Other").
+- The edge function receives `profile.gender` and instructs the model to suggest higher loads for males and appropriate loads/exercise choices for females (e.g. progressions, alternatives) without reducing volume. As the user logs more workouts, the AI should rely more on actual history than gender defaults.
+
+### Active Recovery (rest) days
+- When **today** is a scheduled rest/active recovery day, the Today tab shows an "Active Recovery" card with:
+  - **Generate with customizations** — opens the modifications screen for a cardio/recovery-style AI workout.
+  - **Speed Log** — log any workout (including cardio) manually.
+- There is **no** "Log Cardio" or "Log Rest Day" button; cardio is logged via Speed Log.
+
+### Cost and safeguards
+- NEVER call the AI API in a loop, useEffect, or on screen mount.
+- ONLY call when the user explicitly taps "Generate Workout" or "Generate without modifications" (or "Generate with customizations" on rest day).
+- Cache plans in `ai_workout_plans`; show cached plan when available.
+- Loading state prevents double-tap. Preview screen uses **"Customize"** (not "Regenerate") with a credit warning.
+- Model: `claude-sonnet-4-20250514`; `max_tokens` is set in the edge function (e.g. 2800).
 
 ---
 
@@ -486,4 +508,7 @@ After each step, make sure the app compiles and runs. Do NOT proceed to the next
 
 - **Program styles**: Only four are supported: `ppl`, `upper_lower`, `aesthetic`, `ai_optimal`. No Bro Split or Full Body. See `docs/pumped-technical-spec-v2.md` and migration `008_program_style_four_only.sql`.
 - **Session date when saving**: When the client creates a `workout_session` (after logging a workout), the `date` field must be the user's **local calendar date** (e.g. via `getLocalDateString()` from `utils/date.ts`), not UTC. This avoids workouts appearing on the wrong day in Past Workouts and on the calendar. See technical spec §Implementation Status.
+- **Muscle readiness**: The AI uses the same strain-based recovery data as the Muscle Readiness diagram. See `services/fatigue.ts` (`getBodyMapReadiness`, `recordWorkoutStrain`) and `docs/pumped-muscle-readiness-model.md`.
+- **Gender**: Profile stores `gender` as `'male' | 'female'` (onboarding; no "Other"). The edge function uses it for suggested weights and exercise selection; the more history the user has, the more the AI should rely on actual logged data.
+- **Active Rest day UI**: On rest days the Today tab shows only "Generate with customizations" and "Speed Log". There is no "Log Cardio" or "Log Rest Day" button.
 - **Redeploy edge function** after changing the system prompt: `supabase functions deploy generate-workout --no-verify-jwt`

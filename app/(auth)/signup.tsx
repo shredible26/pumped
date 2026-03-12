@@ -16,23 +16,29 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { colors, font, spacing, radius } from '@/utils/theme';
 
+const PASSWORD_MIN_LENGTH = 8;
+
+const PASSWORD_REQUIREMENTS = `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+
 export default function SignUpScreen() {
   const router = useRouter();
   const { signUp, signInWithApple, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [signUpSuccess, setSignUpSuccess] = useState(false);
 
   const handleSignUp = async () => {
     if (!email || !password) {
       Alert.alert('Missing fields', 'Please enter your email and password.');
       return;
     }
-    if (password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters.');
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      Alert.alert('Password too short', PASSWORD_REQUIREMENTS);
       return;
     }
     try {
       await signUp(email.trim(), password);
+      setSignUpSuccess(true);
     } catch (err: any) {
       Alert.alert('Sign Up Failed', err?.message || 'Something went wrong.');
     }
@@ -50,6 +56,10 @@ export default function SignUpScreen() {
 
         <Text style={styles.title}>Create Account</Text>
 
+        {signUpSuccess && (
+          <Text style={styles.successMessage}>Successful Sign Up!</Text>
+        )}
+
         <View style={styles.form}>
           <TextInput
             style={styles.input}
@@ -62,15 +72,20 @@ export default function SignUpScreen() {
             onChangeText={setEmail}
             editable={!loading}
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={colors.text.tertiary}
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-            editable={!loading}
-          />
+          <View>
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor={colors.text.tertiary}
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              editable={!loading}
+            />
+            <Text style={styles.passwordHint}>
+              At least {PASSWORD_MIN_LENGTH} characters
+            </Text>
+          </View>
           <Pressable
             style={[styles.primaryButton, loading && styles.buttonDisabled]}
             onPress={handleSignUp}
@@ -120,6 +135,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text.primary,
     marginTop: spacing.lg,
+  },
+  successMessage: {
+    marginTop: spacing.md,
+    fontSize: font.lg,
+    fontWeight: '600',
+    color: colors.accent.primary,
+  },
+  passwordHint: {
+    marginTop: spacing.xs,
+    marginLeft: spacing.sm,
+    fontSize: font.xs,
+    color: colors.text.tertiary,
   },
   form: {
     marginTop: spacing.xxxl,

@@ -130,6 +130,7 @@ export default function ModificationsScreen() {
             equipment_access: profile.equipment_access,
             training_frequency: profile.training_frequency,
             weight_lbs: profile.weight_lbs,
+            gender: profile.gender ?? undefined,
           },
           fatigueMap: fatigueRecord,
           recentHistory,

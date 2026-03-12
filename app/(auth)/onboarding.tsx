@@ -256,7 +256,7 @@ function StepAboutYou({
 
       <Text style={styles.label}>Gender</Text>
       <View style={styles.genderRow}>
-        {(['male', 'female', 'other'] as const).map((g) => (
+        {(['male', 'female'] as const).map((g) => (
           <Pressable
             key={g}
             style={[styles.genderButton, gender === g && styles.genderSelected]}

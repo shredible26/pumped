@@ -99,6 +99,8 @@ FATIGUE RULES (recovery_pct from fatigueMap: null/gray = no data yet — treat a
 5. Adjust sets/reps/weight by fatigue: fatigued muscles → fewer sets (2-3), higher reps (12-15), lighter weight. Recovered muscles → normal programming per user goals.
 6. If ALL muscles are fatigued but the user still wants to train, generate a light recovery workout only; in EACH exercise's "why", state that recovery is the priority.
 
+GENDER: Use the user's gender (male/female) when suggesting weights and exercises: males typically get slightly higher suggested loads for the same movement; females get appropriate loads and exercise selection (e.g. progressions, alternatives) without reducing volume. The more workout history the user has, the more you can rely on their actual numbers; for new users, use gender and experience level as a guide.
+
 DURATION CALCULATION: Estimate workout duration using this formula:
 - Each SET takes approximately 30-45 seconds to perform
 - Rest between sets: 2 minutes for compound exercises, 90 seconds for isolation exercises
@@ -109,7 +111,7 @@ DURATION CALCULATION: Estimate workout duration using this formula:
 - The estimated_minutes field MUST be accurate based on this calculation, not a guess
 
 ALWAYS include at the top level:
-- "description": string, 2-3 sentences explaining WHY this workout was chosen: which muscles are recovered and targeted, which are avoided or given reduced volume, and how this fits the program.
+- "description": string, 2-3 SHORT sentences (fit on one screen) explaining WHY this workout was chosen. For program_style "aesthetic", focus the description on aesthetic goals (proportions, symmetry, why these exercises build the look they want). Otherwise: which muscles are recovered and targeted, which are avoided or given reduced volume, and how this fits the program.
 - "primary_targets": array of muscle group name strings (e.g. ["chest","triceps","front_delts"]) being trained today.
 
 STRICT RULES:
@@ -161,8 +163,16 @@ USER PROFILE:
 - Equipment: ${equipmentAccess}
 - Frequency: ${profile?.training_frequency || 4} days/week
 - Weight: ${profile?.weight_lbs || "unknown"} lbs
+- Gender: ${profile?.gender === "male" ? "male" : profile?.gender === "female" ? "female" : "not specified"}
+
+GENDER GUIDANCE (use for weight and exercise selection):
+- Male: typically use higher suggested weights for the same rep ranges; favor compound lifts at moderate-heavy loads when appropriate.
+- Female: typically use slightly lower starting weights for the same rep ranges; include a mix of compound and isolation; consider exercise difficulty (e.g. bodyweight progressions, machine alternatives) where helpful. Do not reduce volume or quality — only adjust load and exercise choice to be appropriate.
+- Not specified: use neutral defaults based on experience level and history.
 
 TODAY TYPE: ${todayType === "rest" ? "Rest day but user may train — light recovery only." : todayType === "ai_decides" ? "You decide from fatigue." : todayType}
+
+${profile?.program_style === "aesthetic" ? `PROGRAM STYLE IS AESTHETIC: Tailor this workout entirely for aesthetics — proportions, symmetry, and hypertrophy for appearance. Choose exercises that build a balanced, aesthetic physique (e.g. shoulder development, arm symmetry, chest shape, back width). The "description" field MUST be a brief 2-3 sentence summary explaining why these exercises were chosen for the user's aesthetic goals; keep it concise so it fits on screen. Each exercise "why" can reference aesthetic benefit where relevant.` : ""}
 
 MUSCLE READINESS (same as Muscle Readiness diagram — analyze before choosing exercises; red <30% avoid primary; yellow 30-60 moderate; green >60 full; null = no data = available):
 ${Object.entries(fatigueMap || {}).map(([muscle, data]: [string, any]) => {

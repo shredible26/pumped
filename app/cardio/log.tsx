@@ -7,6 +7,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -107,38 +109,44 @@ export default function CardioLogScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        <Text style={styles.sectionLabel}>Activity</Text>
-        {cardioExercises.map((ex) => (
-          <Pressable
-            key={ex.id}
-            style={[
-              styles.exerciseRow,
-              selectedExercise?.id === ex.id && styles.exerciseRowSelected,
-            ]}
-            onPress={() => setSelectedExercise(ex)}
-          >
-            <Text style={styles.exerciseName}>{ex.name}</Text>
-            {selectedExercise?.id === ex.id && (
-              <Ionicons name="checkmark-circle" size={22} color={colors.accent.primary} />
-            )}
-          </Pressable>
-        ))}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={{ paddingBottom: spacing.xl }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.sectionLabel}>Activity</Text>
+          {cardioExercises.map((ex) => (
+            <Pressable
+              key={ex.id}
+              style={[
+                styles.exerciseRow,
+                selectedExercise?.id === ex.id && styles.exerciseRowSelected,
+              ]}
+              onPress={() => setSelectedExercise(ex)}
+            >
+              <Text style={styles.exerciseName}>{ex.name}</Text>
+              {selectedExercise?.id === ex.id && (
+                <Ionicons name="checkmark-circle" size={22} color={colors.accent.primary} />
+              )}
+            </Pressable>
+          ))}
 
-        <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Duration</Text>
-        <View style={styles.durationCard}>
-          <DurationInput
-            totalMinutes={durationMinutes}
-            onMinutesChange={setDurationMinutes}
-          />
-        </View>
-      </ScrollView>
+          <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Duration</Text>
+          <View style={styles.durationCard}>
+            <DurationInput
+              totalMinutes={durationMinutes}
+              onMinutesChange={setDurationMinutes}
+            />
+          </View>
+        </ScrollView>
 
-      <View style={styles.footer}>
+        <View style={styles.footer}>
         <Pressable
           style={[styles.saveButton, (!selectedExercise || saving) && styles.saveButtonDisabled]}
           onPress={handleSave}
@@ -151,12 +159,14 @@ export default function CardioLogScreen() {
           )}
         </Pressable>
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg.primary },
+  keyboardAvoid: { flex: 1 },
   loadingWrap: {
     flex: 1,
     alignItems: 'center',
@@ -213,10 +223,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.lg,
     paddingBottom: 36,

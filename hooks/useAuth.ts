@@ -100,6 +100,7 @@ export function useAuth() {
         options: { data: { display_name: email.split('@')[0] } },
       });
       if (error) throw error;
+      // With "Confirm email" OFF in Supabase (Auth → Providers → Email), users get a session immediately and don't need to verify via link.
     } finally {
       setLoading(false);
     }

@@ -1,7 +1,7 @@
 export type ProgramStyle = 'ppl' | 'upper_lower' | 'aesthetic' | 'ai_optimal';
 export type EquipmentAccess = 'full_gym' | 'home_gym' | 'bodyweight';
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
-export type Gender = 'male' | 'female' | 'other';
+export type Gender = 'male' | 'female';
 
 export interface Profile {
   id: string;

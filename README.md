@@ -29,6 +29,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
 
 The app will scaffold and navigate without real Supabase credentials, but auth and data features require a live Supabase project.
 
+**Auth (optional):** To let users sign in immediately after signup without verifying their email, in the [Supabase Dashboard](https://supabase.com/dashboard) go to **Authentication → Providers → Email** and turn **off** “Confirm email”.
+
 ### 3. Start the dev server
 
 ```bash

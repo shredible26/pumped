@@ -25,7 +25,6 @@ import { useFatigue } from '@/hooks/useFatigue';
 import { supabase } from '@/services/supabase';
 import { getTodaysPlan } from '@/services/ai';
 import { updateProfileStreak } from '@/services/streak';
-import { createSession } from '@/services/workouts';
 import { getHistoricalFatigueMap } from '@/services/fatigue';
 import { Profile } from '@/types/user';
 import BodyMap from '@/components/home/BodyMap';
@@ -67,7 +66,6 @@ export default function TodayScreen() {
   const [activityDaysThisWeek, setActivityDaysThisWeek] = useState<string[]>([]);
   const [cachedPlan, setCachedPlan] = useState<GeneratedWorkout | null>(null);
   const [sessionsForSelectedDate, setSessionsForSelectedDate] = useState<SessionForDate[]>([]);
-  const [loggingRestDay, setLoggingRestDay] = useState(false);
   const [historicalFatigueMap, setHistoricalFatigueMap] = useState<Array<{ muscle_group: string; recovery_pct: number | null; last_trained_at: string | null }>>([]);
 
   const fetchProfile = useCallback(async () => {
@@ -212,38 +210,6 @@ export default function TodayScreen() {
     setSelectedMuscle(muscle);
     setSheetVisible(true);
   }, []);
-
-  const handleLogRestDay = useCallback(async () => {
-    if (!session?.user?.id) return;
-    setLoggingRestDay(true);
-    try {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      await createSession({
-        user_id: session.user.id,
-        date: today,
-        name: 'Rest Day',
-        completed: true,
-        is_rest_day: true,
-        workout_type: null,
-        source: 'custom',
-        exercise_count: 0,
-        set_count: 0,
-        total_volume: 0,
-        pr_count: 0,
-        started_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-      });
-      const streakResult = await updateProfileStreak(session.user.id);
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-      if (profileData) setProfile({ ...profileData, ...streakResult } as Profile);
-      await fetchWeekWorkouts();
-    } catch {}
-    setLoggingRestDay(false);
-  }, [session?.user?.id, setProfile, fetchWeekWorkouts]);
 
   const streak = profile?.current_streak_days ?? 0;
   const totalWorkouts = profile?.total_workouts ?? 0;
@@ -481,34 +447,15 @@ export default function TodayScreen() {
                   style={[styles.restDayButton, styles.restDayButtonFirst]}
                   onPress={() => router.push('/workout/modifications')}
                 >
-                  <Ionicons name="sparkles" size={18} color={colors.text.inverse} />
-                  <Text style={styles.startButtonText}>Customize Cardio</Text>
-                </Pressable>
-                {sessionsForSelectedDate.length === 0 && (
-                  <Pressable
-                    style={styles.restDayButton}
-                    onPress={() => void handleLogRestDay()}
-                    disabled={loggingRestDay}
-                  >
-                    <Ionicons name="body-outline" size={18} color={colors.text.inverse} />
-                    <Text style={styles.startButtonText}>
-                      {loggingRestDay ? 'Logging…' : 'Log Rest Day'}
-                    </Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  style={styles.restDayButton}
-                  onPress={() => router.push('/cardio/log')}
-                >
-                  <Ionicons name="bicycle" size={18} color={colors.text.inverse} />
-                  <Text style={styles.startButtonText}>Log Cardio</Text>
+                  <Ionicons name="sparkles" size={18} color={colors.text.primary} />
+                  <Text style={styles.restDayButtonText}>Generate Workout</Text>
                 </Pressable>
                 <Pressable
                   style={styles.restDayButton}
                   onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
                 >
-                  <Ionicons name="flash" size={18} color={colors.text.inverse} />
-                  <Text style={styles.startButtonText}>Speed Log</Text>
+                  <Ionicons name="flash" size={18} color={colors.text.primary} />
+                  <Text style={styles.restDayButtonText}>Speed Log</Text>
                 </Pressable>
               </View>
             </View>
@@ -915,13 +862,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.accent.primary,
+    backgroundColor: colors.bg.primary,
     paddingVertical: spacing.lg,
     borderRadius: radius.md,
     marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border.light,
   },
   restDayButtonFirst: {
     marginTop: 0,
+  },
+  restDayButtonText: {
+    color: colors.text.primary,
+    fontSize: font.md,
+    fontWeight: '600',
   },
 
   card: {

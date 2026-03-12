@@ -133,7 +133,7 @@ export default function WorkoutPreviewScreen() {
         <Text style={styles.workoutName}>{plan.name}</Text>
 
         {plan.description ? (
-          <Text style={styles.workoutDescription} numberOfLines={3}>
+          <Text style={styles.workoutDescription}>
             {plan.description}
           </Text>
         ) : null}
