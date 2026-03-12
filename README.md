@@ -45,6 +45,14 @@ This runs `expo start` and prints a QR code in your terminal.
 2. Open the **Expo Go** app on your phone.
 3. Scan the QR code shown in the terminal (iOS Camera app also works).
 
+**If the app never loads or times out** when using `npx expo start` (local network), try:
+
+```bash
+npx expo start --tunnel
+```
+
+Tunnel uses a public URL so the phone doesn’t need to reach your machine on the local network. It’s useful when Wi‑Fi isolation, firewalls, or VPNs block local access. The first tunnel connection may take a bit longer to establish.
+
 ### 5. Open in iOS Simulator (requires Xcode)
 
 Press `i` in the terminal after the dev server starts, or run:
@@ -113,3 +121,11 @@ utils/          theme, date, schedule, workoutName, units, epley, recoveryModel
 
 ### Data persistence
 - Workouts, sets, profile, fatigue, streaks, and AI plans are stored in Supabase keyed by user. Sign out clears local state; signing back in loads that user’s data. Active workout draft is cleared on sign out.
+
+### TODO
+- When a workout is generated, allow the user to save the workout (add to saved workouts) without having to log the workout.
+- Fix 'Score' on Profile page
+- Make sure the 'Workouts' number in the Progress page is always accurate (accurately represents the number of workouts visible in 'Past workouts' in the Workouts tab under 'All'.) This number should never be inaccurate, especially when workouts are deleted (present day, past day, etc)
+- When the current day/today is a non Active Rest day, after a user has generated a workout, it should look like this (show screenshot). Right now this workouts only when the user does not have any workouts logged today. When a user has 1+ workouts logged today (regardless of whether it is the AI generated workout shown in the screenshot or a some other workout the user logs for today using 'Speed Log), those should just appear above the Muscle Readiness section in a 'Past Workouts' section, like how it usually is (for past days when a user has workouts recorded). Even when workouts are recorded on the present day, for non - Active Recovery days, (because you don't need to fix Active Recovery it already works) you should see the section in the screenshot that contain the 'View Workout' and 'Speed Log' buttons (only after the user has generated a workout, otherwise it should continue showing the usual generate workout screen that already exists), this should not dissapear after a user logs the generated workout or another workout. This should only get replaced if the user re-generates the workout (by clicking 'View Workout' -> 'Customize Workout'), at which case the element should be the same, it should just display the newly generated workout if the user clicks 'View Workout' (and the workout name in the element should change to the newly generated workout name).
+- Change 'View Workout' -> 'Customize Workout' to View Workout -> Regenerate
+- When a user is logging a time-based exercise like running, walking, etc (something that does not include repetions), make sure to only have an optional 'minutes and seconds' log, not sets/reps. You should not be able to add multiple sets as well. 

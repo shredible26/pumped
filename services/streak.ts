@@ -2,15 +2,16 @@ import { supabase } from './supabase';
 
 /**
  * Calculate current streak from workout_sessions.
- * - Counts days with at least one completed workout OR is_rest_day (rest days don't break the streak).
- * - Streak = consecutive days (today/yesterday backward) that have activity.
+ * - Counts only days where the user logged at least one actual workout (completed and not rest-day-only).
+ * - Active Recovery days count if the user logged any workout (e.g. cardio); rest-day-only logs do not extend the streak.
  */
 export async function calculateStreak(userId: string): Promise<number> {
   const { data: sessions } = await supabase
     .from('workout_sessions')
     .select('date, completed, is_rest_day')
     .eq('user_id', userId)
-    .or('completed.eq.true,is_rest_day.eq.true')
+    .eq('completed', true)
+    .or('is_rest_day.is.null,is_rest_day.eq.false')
     .order('date', { ascending: false });
 
   if (!sessions || sessions.length === 0) return 0;

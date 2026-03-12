@@ -306,12 +306,16 @@ export default function TodayScreen() {
               {isSelectedToday
                 ? isRestDay
                   ? 'Rest day — recover and grow'
-                  : `${todayType} day scheduled`
-                : sessionsForSelectedDate.length > 0
-                  ? `${sessionsForSelectedDate.length} workout${sessionsForSelectedDate.length === 1 ? '' : 's'} completed`
-                  : selectedDateType === 'Rest'
-                    ? 'Rest day'
-                    : 'No workout logged'}
+                  : `${todayType} day`
+                : (() => {
+                    const splitDayLabel = selectedDateType === 'Rest'
+                      ? 'Active Recovery day'
+                      : `${getDisplayWorkoutType(profile?.program_style, selectedDateType)} day`;
+                    if (sessionsForSelectedDate.length > 0) {
+                      return `${sessionsForSelectedDate.length} workout${sessionsForSelectedDate.length === 1 ? '' : 's'} completed • ${splitDayLabel}`;
+                    }
+                    return splitDayLabel;
+                  })()}
             </Text>
           )}
         </View>
@@ -336,16 +340,30 @@ export default function TodayScreen() {
           </View>
         )}
 
-        {/* Today + workout(s) already logged: show list of sessions (like past day), no AI card */}
+        {/* Today + workout(s) already logged: show list of sessions with View Workout buttons, no AI card */}
         {isSelectedToday && !isRestDay && sessionsForSelectedDate.length > 0 && (
           <View style={styles.pastSessionsContainer}>
-            <Pressable
-              style={styles.speedLogButtonStandalone}
-              onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
-            >
-              <Ionicons name="flash" size={18} color={colors.text.primary} />
-              <Text style={styles.speedLogButtonText}>Speed Log</Text>
-            </Pressable>
+            <View style={styles.restButtonColumn}>
+              <Pressable
+                style={[styles.restDayButton, styles.restDayButtonFirst]}
+                onPress={() => router.push('/workout/modifications')}
+              >
+                <Ionicons name="sparkles" size={18} color={colors.text.primary} />
+                <Text style={styles.restDayButtonText}>Generate Workout</Text>
+              </Pressable>
+              <Pressable
+                style={styles.restDayButton}
+                onPress={() =>
+                  router.push({
+                    pathname: '/speedlog',
+                    params: { logForDate: format(selectedDate, 'yyyy-MM-dd') },
+                  })
+                }
+              >
+                <Ionicons name="flash" size={18} color={colors.text.primary} />
+                <Text style={styles.restDayButtonText}>Speed Log</Text>
+              </Pressable>
+            </View>
             <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             {sessionsForSelectedDate.map((sess) => (
               <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
@@ -354,13 +372,9 @@ export default function TodayScreen() {
                     <Ionicons name="barbell" size={18} color={colors.accent.primary} />
                   </View>
                 </View>
-            <Text
-              style={styles.workoutType}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              {sess.name}
-            </Text>
+                <Text style={styles.workoutType} numberOfLines={1} ellipsizeMode="tail">
+                  {sess.name}
+                </Text>
                 <Text style={styles.programName}>
                   {format(selectedDate, 'MMM d, yyyy')}
                   {sess.completed_at
@@ -445,8 +459,8 @@ export default function TodayScreen() {
 
         {isSelectedToday && isRestDay && (
           <>
-            {/* When a workout has been generated on Active Recovery, show card with View Workout only (Speed Log is in the Active Recovery card below) */}
-            {cachedPlan && (
+            {/* When a workout has been generated on Active Recovery and not yet logged, show card with View Workout (once logged, workout appears under Workouts Completed only) */}
+            {cachedPlan && sessionsForSelectedDate.length === 0 && (
               <View style={styles.restDayGeneratedCardWrap}>
                 <View style={styles.workoutCard}>
                   <View style={styles.workoutCardHeader}>
@@ -495,7 +509,7 @@ export default function TodayScreen() {
               </View>
             </View>
             {sessionsForSelectedDate.length > 0 && (
-              <View style={styles.pastSessionsContainer}>
+              <View style={[styles.pastSessionsContainer, styles.pastSessionsContainerAfterRestCard]}>
                 <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
                 {sessionsForSelectedDate.map((sess) => (
                   <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
@@ -751,6 +765,23 @@ const styles = StyleSheet.create({
   pastSessionsContainer: {
     gap: spacing.md,
     paddingHorizontal: spacing.xl,
+  },
+  pastSessionsContainerAfterRestCard: {
+    marginTop: spacing.lg,
+  },
+  completedLabelWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  completedLabelText: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.accent.primary,
+    letterSpacing: 0.3,
   },
   workoutCard: {
     backgroundColor: colors.bg.card,
