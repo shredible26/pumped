@@ -9,6 +9,8 @@ import {
   Modal,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -76,9 +78,12 @@ export default function SpeedLogEditorScreen() {
     setLoadingDb(true);
     try {
       const data = await fetchExercises();
-      setAllExercises(data);
-    } catch {}
-    setLoadingDb(false);
+      setAllExercises(data ?? []);
+    } catch {
+      setAllExercises([]);
+    } finally {
+      setLoadingDb(false);
+    }
   };
 
   const filteredExercises = useMemo(() => {
@@ -205,7 +210,7 @@ export default function SpeedLogEditorScreen() {
                 name: e.exercise.name,
               }))
             ) || `${type || 'Custom'} Workout`;
-      const sessionDate = dateParam && /^\d{4}-\d{2}-\d2}$/.test(dateParam)
+      const sessionDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
         ? dateParam
         : getLocalDateString();
       const ws = await createSession({
@@ -262,7 +267,8 @@ export default function SpeedLogEditorScreen() {
       }
 
       await applyWorkoutFatigue(userId, contributions).catch(() => {});
-      await recordWorkoutStrain(userId, ws.id, new Date()).catch(() => {});
+      const completedAtForStrain = new Date(sessionDate + 'T12:00:00');
+      await recordWorkoutStrain(userId, ws.id, completedAtForStrain).catch(() => {});
 
       const prevTotal = profile?.total_workouts ?? 0;
       await supabase
@@ -303,20 +309,22 @@ export default function SpeedLogEditorScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
-          <Ionicons name="close" size={24} color={colors.text.primary} />
+        <Pressable onPress={() => router.back()} style={styles.headerBack}>
+          <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
+          <Text style={styles.headerBackText}>Back</Text>
         </Pressable>
         <View style={styles.headerCenter}>
           <Ionicons name="flash" size={16} color={colors.accent.primary} />
           <Text style={styles.headerTitle}>Speed Log</Text>
         </View>
-        <View style={{ width: 24 }} />
+        <View style={{ width: 60 }} />
       </View>
 
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 140 }}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.titleRow}>
           <TextInput
@@ -328,7 +336,7 @@ export default function SpeedLogEditorScreen() {
             selectTextOnFocus
           />
           <View style={styles.newBadge}>
-            <Text style={styles.newBadgeText}>NEW</Text>
+            <Text style={styles.newBadgeText}>EDIT</Text>
           </View>
         </View>
 
@@ -484,59 +492,76 @@ export default function SpeedLogEditorScreen() {
       )}
 
       <Modal visible={searchOpen} animationType="slide" onRequestClose={() => setSearchOpen(false)}>
-        <SafeAreaView style={styles.searchContainer}>
+        <SafeAreaView style={styles.searchContainer} edges={['top']}>
           <View style={styles.searchHeader}>
-            <Pressable onPress={() => { setSearchOpen(false); setSearchQuery(''); }}>
-              <Ionicons name="close" size={24} color={colors.text.primary} />
-            </Pressable>
+            <View style={{ width: 60 }} />
             <Text style={styles.searchTitle}>Add Exercise</Text>
-            <View style={{ width: 24 }} />
+            <View style={{ width: 60 }} />
           </View>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search exercises..."
-            placeholderTextColor={colors.text.tertiary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoFocus
-          />
-          {loadingDb ? (
-            <ActivityIndicator color={colors.accent.primary} style={{ marginTop: 40 }} />
-          ) : (
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {groupedExercises.map(([muscle, exList]) => (
-                <View key={muscle}>
-                  <Text style={styles.groupLabel}>
-                    {muscle.replace('_', ' ').toUpperCase()}
-                  </Text>
-                  {exList.map((ex) => {
-                    const added = exercises.some((e) => e.exercise.id === ex.id);
-                    return (
-                      <Pressable
-                        key={ex.id}
-                        style={styles.searchItem}
-                        onPress={() => addExercise(ex)}
-                        disabled={added}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.searchItemName}>{ex.name}</Text>
-                          <Text style={styles.searchItemMeta}>
-                            {ex.equipment} · {ex.difficulty}
-                          </Text>
-                        </View>
-                        <Ionicons
-                          name={added ? 'checkmark-circle' : 'add-circle-outline'}
-                          size={22}
-                          color={added ? colors.accent.primary : colors.text.tertiary}
-                        />
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ))}
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          )}
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search exercises..."
+              placeholderTextColor={colors.text.tertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {loadingDb ? (
+              <ActivityIndicator color={colors.accent.primary} style={{ marginTop: 40 }} />
+            ) : (
+              <ScrollView
+                style={{ flex: 1 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 100 }}
+              >
+                {groupedExercises.map(([muscle, exList]) => (
+                  <View key={muscle}>
+                    <Text style={styles.groupLabel}>
+                      {muscle.replace('_', ' ').toUpperCase()}
+                    </Text>
+                    {exList.map((ex) => {
+                      const added = exercises.some((e) => e.exercise.id === ex.id);
+                      return (
+                        <Pressable
+                          key={ex.id}
+                          style={styles.searchItem}
+                          onPress={() => addExercise(ex)}
+                          disabled={added}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.searchItemName}>{ex.name}</Text>
+                            <Text style={styles.searchItemMeta}>
+                              {ex.equipment} · {ex.difficulty}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name={added ? 'checkmark-circle' : 'add-circle-outline'}
+                            size={22}
+                            color={added ? colors.accent.primary : colors.text.tertiary}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
+                <View style={{ height: 24 }} />
+              </ScrollView>
+            )}
+            <View style={styles.searchBackFooter}>
+              <Pressable
+                style={styles.searchBackButton}
+                onPress={() => { setSearchOpen(false); setSearchQuery(''); }}
+              >
+                <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+                <Text style={styles.searchBackButtonText}>Back</Text>
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -552,6 +577,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
   },
+  headerBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  headerBackText: { fontSize: font.md, fontWeight: '600', color: colors.text.primary },
   headerCenter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -669,6 +700,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   logButtonText: { color: colors.text.inverse, fontSize: font.lg, fontWeight: '700' },
+
+  searchBackFooter: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    paddingBottom: 24,
+    backgroundColor: colors.bg.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+    alignItems: 'center',
+  },
+  searchBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    minWidth: 120,
+  },
+  searchBackButtonText: { fontSize: font.md, fontWeight: '600', color: colors.text.primary },
 
   editOverlay: {
     flex: 1,

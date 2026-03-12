@@ -214,15 +214,7 @@ export default function WorkoutsScreen() {
 
         {/* Saved Workouts */}
         <Text style={styles.sectionHeader}>Saved Workouts</Text>
-        {savedWorkouts.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="bookmark-outline" size={28} color={colors.text.tertiary} />
-            <Text style={styles.emptyText}>No saved workouts</Text>
-            <Text style={styles.emptySubtext}>
-              Save a workout from Speed Log to reuse it here.
-            </Text>
-          </View>
-        ) : (
+        {savedWorkouts.length > 0 &&
           savedWorkouts.map((sw) => {
             const exCount = Array.isArray(sw.exercises) ? sw.exercises.length : 0;
             return (
@@ -253,8 +245,7 @@ export default function WorkoutsScreen() {
                 </Pressable>
               </Pressable>
             );
-          })
-        )}
+          })}
 
         {/* Create Custom Workout */}
         <Pressable
@@ -273,9 +264,9 @@ export default function WorkoutsScreen() {
           <Ionicons name="chevron-forward" size={16} color={colors.text.tertiary} />
         </Pressable>
 
-        {/* Celebrity Workouts placeholder */}
+        {/* Import Workouts placeholder */}
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionHeader}>Celebrity Workouts</Text>
+          <Text style={styles.sectionHeader}>Import Workouts</Text>
           <View style={styles.comingSoonBadge}>
             <Text style={styles.comingSoonText}>COMING SOON</Text>
           </View>
@@ -283,7 +274,7 @@ export default function WorkoutsScreen() {
         <View style={styles.celebCard}>
           <Ionicons name="lock-closed" size={24} color={colors.text.tertiary} />
           <Text style={styles.celebText}>
-            Popular routines from athletes and influencers. Coming soon.
+            Import routines to reuse here. Coming soon.
           </Text>
         </View>
 

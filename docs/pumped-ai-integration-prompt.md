@@ -19,6 +19,8 @@ This document describes the AI workout generation flow and how it integrates wit
 - **exercises**: Filtered by equipment; each has `id`, `name`, `primary_muscle`, `equipment`, `difficulty`.
 - **modifications**: Optional user text (injuries, time limits, etc.).
 
+The edge function computes **today's scheduled type** from `program_style` and `training_frequency` (same logic as `utils/schedule.ts`): Push/Pull/Legs for PPL, Upper/Lower for upper_lower, rest on non–workout days, and "ai_decides" for aesthetic/ai_optimal. All generations use this type, user stats, fatigue, history, and modifications.
+
 ### Gender in AI generation
 - Onboarding "About You" collects **Gender** as **Male** or **Female** only (no "Other").
 - The edge function receives `profile.gender` and instructs the model to suggest higher loads for males and appropriate loads/exercise choices for females (e.g. progressions, alternatives) without reducing volume. As the user logs more workouts, the AI should rely more on actual history than gender defaults.
@@ -511,4 +513,6 @@ After each step, make sure the app compiles and runs. Do NOT proceed to the next
 - **Muscle readiness**: The AI uses the same strain-based recovery data as the Muscle Readiness diagram. See `services/fatigue.ts` (`getBodyMapReadiness`, `recordWorkoutStrain`) and `docs/pumped-muscle-readiness-model.md`.
 - **Gender**: Profile stores `gender` as `'male' | 'female'` (onboarding; no "Other"). The edge function uses it for suggested weights and exercise selection; the more history the user has, the more the AI should rely on actual logged data.
 - **Active Rest day UI**: On rest days the Today tab shows only "Generate with customizations" and "Speed Log". There is no "Log Cardio" or "Log Rest Day" button.
+- **Split-specific AI**: PPL and Upper/Lower are day-aware (push/pull/legs or upper/lower only). Aesthetic focuses on hypertrophy and proportions; AI Optimal fully optimizes from data. Rest days get simple cardio (basic gym only). See edge function system prompt for SPLIT-SPECIFIC RULES and CARDIO.
+- **Display labels**: `getDisplayWorkoutType(programStyle, scheduledType)` in `utils/schedule.ts` returns "Aesthetic Optimal" for aesthetic + AI Workout, "AI Optimal" for ai_optimal + AI Workout; used on Today tab (future days) and RoutineTimeline and Speed Log.
 - **Redeploy edge function** after changing the system prompt: `supabase functions deploy generate-workout --no-verify-jwt`

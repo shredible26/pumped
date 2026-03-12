@@ -10,6 +10,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -260,72 +262,84 @@ export default function CustomWorkoutScreen() {
 
       {/* Exercise Search Modal */}
       <Modal visible={searchOpen} animationType="slide" onRequestClose={() => setSearchOpen(false)}>
-        <SafeAreaView style={styles.searchContainer}>
+        <SafeAreaView style={styles.searchContainer} edges={['top']}>
           <View style={styles.searchHeader}>
-            <Pressable
-              style={styles.searchBackButton}
-              onPress={() => {
-                setSearchOpen(false);
-                setSearchQuery('');
-              }}
-            >
-              <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
-              <Text style={styles.searchBackText}>Back</Text>
-            </Pressable>
+            <View style={{ width: 60 }} />
             <Text style={styles.searchTitle}>Add Exercise</Text>
-            <View style={{ width: 24 }} />
+            <View style={{ width: 60 }} />
           </View>
-
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search exercises..."
-            placeholderTextColor={colors.text.tertiary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoFocus
-          />
-
-          {loadingExercises ? (
-            <ActivityIndicator
-              color={colors.accent.primary}
-              size="large"
-              style={{ marginTop: spacing.xxxl }}
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search exercises..."
+              placeholderTextColor={colors.text.tertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
             />
-          ) : (
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {groupedExercises.map(([muscle, exList]) => (
-                <View key={muscle}>
-                  <Text style={styles.groupLabel}>
-                    {muscle.replace('_', ' ').toUpperCase()}
-                  </Text>
-                  {exList.map((ex) => {
-                    const isAdded = exercises.some((e) => e.exercise.id === ex.id);
-                    return (
-                      <Pressable
-                        key={ex.id}
-                        style={[styles.searchItem, isAdded && styles.searchItemAdded]}
-                        onPress={() => addExercise(ex)}
-                        disabled={isAdded}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.searchItemName}>{ex.name}</Text>
-                          <Text style={styles.searchItemMeta}>
-                            {ex.equipment} · {ex.difficulty}
-                          </Text>
-                        </View>
-                        {isAdded ? (
-                          <Ionicons name="checkmark-circle" size={22} color={colors.accent.primary} />
-                        ) : (
-                          <Ionicons name="add-circle-outline" size={22} color={colors.text.tertiary} />
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ))}
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          )}
+
+            {loadingExercises ? (
+              <ActivityIndicator
+                color={colors.accent.primary}
+                size="large"
+                style={{ marginTop: spacing.xxxl }}
+              />
+            ) : (
+              <ScrollView
+                style={{ flex: 1 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 100 }}
+              >
+                {groupedExercises.map(([muscle, exList]) => (
+                  <View key={muscle}>
+                    <Text style={styles.groupLabel}>
+                      {muscle.replace('_', ' ').toUpperCase()}
+                    </Text>
+                    {exList.map((ex) => {
+                      const isAdded = exercises.some((e) => e.exercise.id === ex.id);
+                      return (
+                        <Pressable
+                          key={ex.id}
+                          style={[styles.searchItem, isAdded && styles.searchItemAdded]}
+                          onPress={() => addExercise(ex)}
+                          disabled={isAdded}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.searchItemName}>{ex.name}</Text>
+                            <Text style={styles.searchItemMeta}>
+                              {ex.equipment} · {ex.difficulty}
+                            </Text>
+                          </View>
+                          {isAdded ? (
+                            <Ionicons name="checkmark-circle" size={22} color={colors.accent.primary} />
+                          ) : (
+                            <Ionicons name="add-circle-outline" size={22} color={colors.text.tertiary} />
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
+                <View style={{ height: 24 }} />
+              </ScrollView>
+            )}
+            <View style={styles.searchBackFooter}>
+              <Pressable
+                style={styles.searchBackBtn}
+                onPress={() => {
+                  setSearchOpen(false);
+                  setSearchQuery('');
+                }}
+              >
+                <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+                <Text style={styles.searchBackText}>Back</Text>
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -515,6 +529,24 @@ const styles = StyleSheet.create({
     fontSize: font.sm,
     color: colors.text.primary,
     fontWeight: '600',
+  },
+  searchBackFooter: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    paddingBottom: 24,
+    backgroundColor: colors.bg.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+    alignItems: 'center',
+  },
+  searchBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    minWidth: 120,
   },
   searchTitle: {
     fontSize: font.xl,

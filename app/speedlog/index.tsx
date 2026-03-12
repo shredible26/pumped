@@ -4,11 +4,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
-import { getWorkoutTypeForDate } from '@/utils/schedule';
+import { getWorkoutTypeForDate, getDisplayWorkoutType } from '@/utils/schedule';
+import { parseLocalDate } from '@/utils/date';
 
 const PPL_TYPES = ['Push', 'Pull', 'Legs'];
 const UL_TYPES = ['Upper', 'Lower'];
 
+/** Split options for YOUR SPLIT; aesthetic shows only "Aesthetic Optimal", ai_optimal only "AI Optimal". */
 function getSplitTypes(style: string | undefined): string[] {
   switch (style) {
     case 'ppl':
@@ -16,6 +18,7 @@ function getSplitTypes(style: string | undefined): string[] {
     case 'upper_lower':
       return UL_TYPES;
     case 'aesthetic':
+      return ['Aesthetic Optimal'];
     case 'ai_optimal':
       return ['AI Optimal'];
     default:
@@ -23,7 +26,7 @@ function getSplitTypes(style: string | undefined): string[] {
   }
 }
 
-/** Scheduled type for a given date; display "Cardio" on rest days, "AI Optimal" for AI Workout. */
+/** Scheduled type for a given date; display "Cardio" on rest days; use getDisplayWorkoutType for labels. */
 function getRecommendedDisplayType(
   style: string | undefined,
   date: Date,
@@ -31,8 +34,7 @@ function getRecommendedDisplayType(
 ): string {
   const scheduled = getWorkoutTypeForDate(style, date, trainingFreq);
   if (scheduled === 'Rest') return 'Cardio';
-  if (scheduled === 'AI Workout') return 'AI Optimal';
-  return scheduled;
+  return getDisplayWorkoutType(style, scheduled);
 }
 
 export default function SpeedLogTypeScreen() {
@@ -41,9 +43,7 @@ export default function SpeedLogTypeScreen() {
   const profile = useAuthStore((s) => s.profile);
   const programStyle = profile?.program_style;
   const trainingFreq = profile?.training_frequency ?? 4;
-  const date = logForDate
-    ? new Date(logForDate + 'T12:00:00')
-    : new Date();
+  const date = logForDate ? parseLocalDate(logForDate) : new Date();
   const recommended = getRecommendedDisplayType(programStyle, date, trainingFreq);
   const allTypes = getSplitTypes(programStyle);
   const otherTypes = allTypes.filter((t) => t !== recommended);
@@ -56,10 +56,7 @@ export default function SpeedLogTypeScreen() {
   };
 
   const handleLogCardio = () => {
-    router.push({
-      pathname: '/cardio/log',
-      ...(logForDate ? { params: { logForDate } } : {}),
-    });
+    selectType('Cardio');
   };
 
   return (

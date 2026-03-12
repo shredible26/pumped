@@ -45,3 +45,15 @@ export function getWorkoutTypeForDate(
       return 'Workout';
   }
 }
+
+/** Display label for schedule/timeline/Speed Log: friendly names for AI-based splits. */
+export function getDisplayWorkoutType(
+  programStyle: ProgramStyle | string | undefined,
+  scheduledType: string
+): string {
+  if (scheduledType === 'AI Workout') {
+    if (programStyle === 'aesthetic') return 'Aesthetic Optimal';
+    if (programStyle === 'ai_optimal') return 'AI Optimal';
+  }
+  return scheduledType;
+}

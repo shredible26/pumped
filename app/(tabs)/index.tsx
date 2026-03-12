@@ -31,7 +31,7 @@ import BodyMap from '@/components/home/BodyMap';
 import MuscleDetailSheet from '@/components/home/MuscleDetailSheet';
 import RoutineTimeline from '@/components/home/RoutineTimeline';
 import type { GeneratedWorkout } from '@/services/ai';
-import { getWorkoutTypeForDate } from '@/utils/schedule';
+import { getWorkoutTypeForDate, getDisplayWorkoutType } from '@/utils/schedule';
 
 const PROGRAM_LABELS: Record<string, string> = {
   ppl: 'Push/Pull/Legs',
@@ -290,16 +290,14 @@ export default function TodayScreen() {
           <Text style={styles.welcomeText}>
             {format(selectedDate, 'EEEE, MMM d')}
           </Text>
-          {!isSelectedFuture && (
+            {!isSelectedFuture && (
             <Text style={styles.welcomeSubtext}>
               {isSelectedToday
                 ? isRestDay
                   ? 'Rest day — recover and grow'
                   : `${todayType} day scheduled`
                 : sessionsForSelectedDate.length > 0
-                  ? sessionsForSelectedDate.length === 1
-                    ? 'Workout completed'
-                    : `${sessionsForSelectedDate.length} workouts completed`
+                  ? `${sessionsForSelectedDate.length} workout${sessionsForSelectedDate.length === 1 ? '' : 's'} completed`
                   : selectedDateType === 'Rest'
                     ? 'Rest day'
                     : 'No workout logged'}
@@ -319,7 +317,7 @@ export default function TodayScreen() {
               </View>
             </View>
             <Text style={styles.workoutType}>
-              {selectedDateType === 'Rest' ? 'Active Recovery Day' : selectedDateType}
+              {selectedDateType === 'Rest' ? 'Active Recovery Day' : getDisplayWorkoutType(profile?.program_style, selectedDateType)}
             </Text>
             <Text style={styles.programName}>
               {format(selectedDate, 'MMM d, yyyy')} · Based on your program
@@ -498,7 +496,6 @@ export default function TodayScreen() {
 
         {!isSelectedToday && !isSelectedFuture && sessionsForSelectedDate.length > 0 && (
           <View style={styles.pastSessionsContainer}>
-            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             <Pressable
               style={styles.speedLogButtonStandalone}
               onPress={() => router.push({ pathname: '/speedlog', params: { logForDate: format(selectedDate, 'yyyy-MM-dd') } })}
@@ -506,6 +503,7 @@ export default function TodayScreen() {
               <Ionicons name="flash" size={18} color={colors.text.primary} />
               <Text style={styles.speedLogButtonText}>Speed Log</Text>
             </Pressable>
+            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
             {sessionsForSelectedDate.map((sess) => (
               <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
                 <View style={styles.workoutCardHeader}>

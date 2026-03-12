@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { format, addDays, startOfWeek, isToday, isBefore, startOfDay } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
-import { getWorkoutTypeForDate } from '@/utils/schedule';
+import { getWorkoutTypeForDate, getDisplayWorkoutType } from '@/utils/schedule';
 
 type ProgramStyle = 'ppl' | 'upper_lower' | 'aesthetic' | 'ai_optimal';
 
@@ -36,7 +36,8 @@ export default function RoutineTimeline({
         {DAY_LABELS.map((dayLetter, i) => {
           const date = addDays(weekStart, i);
           const dateStr = format(date, 'yyyy-MM-dd');
-          const typeLabel = getWorkoutTypeForDate(programStyle, date, trainingFrequency);
+          const scheduledType = getWorkoutTypeForDate(programStyle, date, trainingFrequency);
+          const typeLabel = getDisplayWorkoutType(programStyle, scheduledType);
           const isRest = typeLabel === 'Rest';
           const isDayToday = isToday(date);
           const isPast = isBefore(startOfDay(date), today);

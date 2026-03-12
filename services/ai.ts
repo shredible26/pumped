@@ -9,6 +9,8 @@ interface GenerateWorkoutParams {
   recentHistory: any[];
   exercises: any[];
   modifications?: string;
+  /** User's local day of week (0=Sun … 6=Sat) so server uses correct rest/lift day. */
+  planDayOfWeek?: number;
 }
 
 export interface GeneratedExercise {

@@ -9,6 +9,8 @@ import {
   Modal,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -530,44 +532,57 @@ export default function WorkoutLogScreen() {
         animationType="slide"
         onRequestClose={() => setSearchOpen(false)}
       >
-        <SafeAreaView style={styles.searchContainer}>
+        <SafeAreaView style={styles.searchContainer} edges={['top']}>
           <View style={styles.searchHeader}>
-            <Pressable
-              style={styles.searchBackButton}
-              onPress={() => setSearchOpen(false)}
-            >
-              <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
-              <Text style={styles.searchBackText}>Back</Text>
-            </Pressable>
+            <View style={{ width: 60 }} />
             <Text style={styles.searchTitle}>Add Exercise</Text>
-            <View style={{ width: 24 }} />
+            <View style={{ width: 60 }} />
           </View>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search..."
-            placeholderTextColor={colors.text.tertiary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          <ScrollView style={{ flex: 1 }}>
-            {allExercises
-              .filter(
-                (e) =>
-                  !searchQuery.trim() ||
-                  e.name.toLowerCase().includes(searchQuery.toLowerCase())
-              )
-              .slice(0, 50)
-              .map((ex) => (
-                <Pressable
-                  key={ex.id}
-                  style={styles.searchItem}
-                  onPress={() => addExercise(ex)}
-                >
-                  <Text style={styles.searchItemName}>{ex.name}</Text>
-                  <Text style={styles.searchItemMeta}>{ex.primary_muscle}</Text>
-                </Pressable>
-              ))}
-          </ScrollView>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search exercises..."
+              placeholderTextColor={colors.text.tertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            <ScrollView
+              style={{ flex: 1 }}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 100 }}
+            >
+              {allExercises
+                .filter(
+                  (e) =>
+                    !searchQuery.trim() ||
+                    e.name.toLowerCase().includes(searchQuery.toLowerCase())
+                )
+                .slice(0, 50)
+                .map((ex) => (
+                  <Pressable
+                    key={ex.id}
+                    style={styles.searchItem}
+                    onPress={() => addExercise(ex)}
+                  >
+                    <Text style={styles.searchItemName}>{ex.name}</Text>
+                    <Text style={styles.searchItemMeta}>{ex.primary_muscle}</Text>
+                  </Pressable>
+                ))}
+            </ScrollView>
+            <View style={styles.searchBackFooter}>
+              <Pressable
+                style={styles.searchBackBtn}
+                onPress={() => setSearchOpen(false)}
+              >
+                <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+                <Text style={styles.searchBackText}>Back</Text>
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
@@ -818,6 +833,24 @@ const styles = StyleSheet.create({
     fontSize: font.sm,
     color: colors.text.primary,
     fontWeight: '600',
+  },
+  searchBackFooter: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    paddingBottom: 24,
+    backgroundColor: colors.bg.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+    alignItems: 'center',
+  },
+  searchBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    minWidth: 120,
   },
   searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
   searchInput: {

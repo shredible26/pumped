@@ -41,12 +41,19 @@ export default function SpeedLogSaveScreen() {
       });
     } catch {}
     setSaving(false);
-    router.replace('/(tabs)');
+    goBackToToday();
   };
 
   const handleSkip = () => {
-    router.replace('/(tabs)');
+    goBackToToday();
   };
+
+  /** Dismiss the whole speedlog modal stack (save → editor → index) so we land on Today without duplicating it. */
+  function goBackToToday() {
+    router.dismiss();
+    setTimeout(() => router.dismiss(), 50);
+    setTimeout(() => router.dismiss(), 120);
+  }
 
   return (
     <SafeAreaView style={styles.container}>

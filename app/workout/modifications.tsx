@@ -142,6 +142,7 @@ export default function ModificationsScreen() {
             difficulty: e.difficulty,
           })),
           modifications: withMods ? modifications.trim() : undefined,
+          planDayOfWeek: new Date().getDay(),
         });
 
         await savePlanToCache(session.user.id, plan);

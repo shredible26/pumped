@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { profile, fatigueMap, recentHistory, exercises, modifications } = await req.json();
+    const { profile, fatigueMap, recentHistory, exercises, modifications, planDayOfWeek } = await req.json();
 
     if (!ANTHROPIC_API_KEY) {
       return new Response(
@@ -76,18 +76,46 @@ Deno.serve(async (req) => {
       );
     }
 
-    const programRotations: Record<string, string[]> = {
-      ppl: ["push", "pull", "legs", "push", "pull", "legs", "rest"],
-      upper_lower: ["upper", "lower", "rest", "upper", "lower", "rest", "rest"],
-      aesthetic: [],
-      ai_optimal: [],
-    };
+    // Use client's local day of week so rest/lift day matches the app (avoids timezone bugs)
+    const dayOfWeek =
+      typeof planDayOfWeek === "number" && planDayOfWeek >= 0 && planDayOfWeek <= 6
+        ? planDayOfWeek
+        : new Date().getDay();
 
-    const dayOfWeek = new Date().getDay();
-    const rotation = programRotations[profile?.program_style] || [];
-    const todayType = rotation.length > 0 ? rotation[dayOfWeek] : "ai_decides";
+    const trainingFreq = Math.min(6, Math.max(0, Math.floor(profile?.training_frequency || 4)) || 4);
+    const workoutDayIndices: number[] =
+      trainingFreq === 3 ? [1, 3, 5]
+      : trainingFreq === 4 ? [1, 2, 4, 5]
+      : trainingFreq === 5 ? [1, 2, 3, 4, 5]
+      : trainingFreq === 6 ? [1, 2, 3, 4, 5, 6]
+      : [1, 2, 4, 5];
+    const workoutIndex = workoutDayIndices.indexOf(dayOfWeek);
+    const programStyle = profile?.program_style || "";
 
-    const systemPrompt = `You are the workout AI for Pumped. Before generating ANY exercises, you MUST analyze the user's muscle fatigue data and explicitly reason about which muscles are available.
+    let todayType: string;
+    if (workoutIndex === -1) {
+      todayType = "rest";
+    } else {
+      if (programStyle === "ppl") {
+        todayType = ["push", "pull", "legs"][workoutIndex % 3] ?? "push";
+      } else if (programStyle === "upper_lower") {
+        todayType = workoutIndex % 2 === 0 ? "upper" : "lower";
+      } else {
+        todayType = "ai_decides";
+      }
+    }
+
+    const modificationsStr = modifications && String(modifications).trim();
+    const userAskedForCardio =
+      modificationsStr &&
+      /\bcardio\b|active recovery|recovery workout|cardio only|just cardio|i want cardio/i.test(modificationsStr);
+    const generateCardioOnly = todayType === "rest" || !!userAskedForCardio;
+
+    const systemPrompt = `You are the workout AI for Pumped. Before generating ANY exercises, you MUST check: Is this an ACTIVE RECOVERY day (rest) or did the user explicitly ask for cardio? If YES, you MUST generate ONLY a cardio/active recovery workout — no lifting (no Push, Pull, Legs, Upper, Lower, or Aesthetic strength training). Otherwise, analyze the user's muscle fatigue data and build a lifting plan for the scheduled day type.
+
+CRITICAL: Cardio workouts may ONLY be generated when (1) today is an Active Recovery/rest day in the user's schedule, OR (2) the user explicitly requested cardio in their modifications. In those cases, output ONLY a simple cardio workout (basic gym: treadmill, bike, rower, elliptical). Do NOT generate any strength/lifting workout on rest days.
+
+When generating a LIFTING workout (push, pull, legs, upper, lower, aesthetic, ai_decides), you MUST analyze the user's muscle fatigue data and explicitly reason about which muscles are available.
 
 The fatigueMap is the same data shown on the user's Muscle Readiness diagram (strain-based recovery model). Use it as the single source of truth for recovery.
 
@@ -111,8 +139,17 @@ DURATION CALCULATION: Estimate workout duration using this formula:
 - The estimated_minutes field MUST be accurate based on this calculation, not a guess
 
 ALWAYS include at the top level:
-- "description": string, 2-3 SHORT sentences (fit on one screen) explaining WHY this workout was chosen. For program_style "aesthetic", focus the description on aesthetic goals (proportions, symmetry, why these exercises build the look they want). Otherwise: which muscles are recovered and targeted, which are avoided or given reduced volume, and how this fits the program.
+- "name": string, a SHORT descriptive workout title (e.g. "Push Day - Chest & Triceps", "Upper Body", "Aesthetic Lower"). Always set this; the app uses it when the user does not edit.
+- "description": string, 2-3 SHORT sentences (must fit on one screen; avoid long paragraphs). Explain WHY this workout was chosen given today's type, recovery, and user goals.
 - "primary_targets": array of muscle group name strings (e.g. ["chest","triceps","front_delts"]) being trained today.
+
+SPLIT-SPECIFIC RULES (follow the scheduled day type exactly):
+- PPL: When today is "push", select ONLY push exercises (chest, front_delts, side_delts, triceps). When "pull", ONLY pull (lats, traps, rear_delts, biceps, forearms). When "legs", ONLY lower body (quads, hamstrings, glutes, calves, abs if relevant). Use user stats (gender, weight), equipment, fatigue, and recent history to choose sets/reps/weights and progressions. When "rest", generate a simple CARDIO workout: 1-3 activities available at a basic gym (treadmill, bike, rower, elliptical); duration-based; respect user modifications. No heavy lifting on rest.
+- Upper/Lower: When "upper", only upper-body exercises (chest, back, shoulders, arms). When "lower", only lower-body (quads, hamstrings, glutes, calves, abs). Same use of stats, equipment, fatigue, history. When "rest", same cardio rule as PPL — basic gym only.
+- Aesthetic: Tailor every workout for aesthetics — hypertrophy, proportions, symmetry, staying lean. Prefer higher volume (e.g. 3-4 sets, 8-12 reps), moderate weights; include isolation for shape. Use all user data. When "rest", same cardio rule.
+- AI Optimal: Fully optimize using all user data (gender, weight, equipment, fatigue, history, preferences). Choose the best workout type from fatigue and balance. When "rest", same cardio rule.
+
+CARDIO (rest days): Only suggest activities available at a basic gym: treadmill, stationary bike, rower, elliptical, jump rope. No specialty equipment. Keep it simple (e.g. "30 min treadmill", "20 min row + 10 min bike"). Respect user modifications (duration, limitations).
 
 STRICT RULES:
 1. Select exercises ONLY from the provided list (exact exercise IDs).
@@ -155,9 +192,23 @@ JSON FORMAT (required keys including description and primary_targets):
   ]
 }`;
 
-    let userPrompt = `Generate today's workout. FIRST: reason about fatigue — which muscles are available (green/yellow/red/null) — then build the plan.
+    const todayTypeLabel =
+      todayType === "rest" ? "Active Recovery / Cardio (user chose to train)"
+      : todayType === "push" ? "Push (chest, front/side delts, triceps)"
+      : todayType === "pull" ? "Pull (back, rear delts, biceps)"
+      : todayType === "legs" ? "Legs (quads, hamstrings, glutes, calves)"
+      : todayType === "upper" ? "Upper body (chest, back, shoulders, arms)"
+      : todayType === "lower" ? "Lower body (quads, hamstrings, glutes, calves)"
+      : "AI decides (optimize from fatigue and balance)";
 
-USER PROFILE:
+    let userPrompt = "";
+    if (generateCardioOnly) {
+      userPrompt = `TODAY IS AN ACTIVE RECOVERY DAY (or the user explicitly requested cardio). You MUST generate ONLY a simple CARDIO / active recovery workout. Do NOT generate any strength or lifting workout — no Push, Pull, Legs, Upper, Lower, or Aesthetic lifting. Only cardio activities available at a basic gym: treadmill, stationary bike, rower, elliptical, jump rope. Keep it simple (e.g. 1-3 activities, duration-based). Respect any user modifications (duration, etc.). Use the exercise list if it contains cardio options; otherwise describe a minimal cardio plan in the workout name and description. Return valid JSON with "name" (e.g. "Active Recovery - Cardio"), "description", "primary_targets" (e.g. [] or ["cardio"]), "type": "cardio", and "exercises" (only cardio exercises from the list, or minimal placeholder if none).\n\n`;
+    }
+
+    userPrompt += `Generate today's workout. You MUST use: (1) user profile and stats below, (2) muscle fatigue/readiness, (3) recent workout history, (4) any user modifications. FIRST reason about fatigue — then build the plan for TODAY'S SCHEDULED TYPE.
+
+USER PROFILE (use for exercise choice, sets, reps, and weights):
 - Program style: ${profile?.program_style}
 - Experience: ${profile?.experience_level || "intermediate"}
 - Equipment: ${equipmentAccess}
@@ -165,14 +216,13 @@ USER PROFILE:
 - Weight: ${profile?.weight_lbs || "unknown"} lbs
 - Gender: ${profile?.gender === "male" ? "male" : profile?.gender === "female" ? "female" : "not specified"}
 
-GENDER GUIDANCE (use for weight and exercise selection):
-- Male: typically use higher suggested weights for the same rep ranges; favor compound lifts at moderate-heavy loads when appropriate.
-- Female: typically use slightly lower starting weights for the same rep ranges; include a mix of compound and isolation; consider exercise difficulty (e.g. bodyweight progressions, machine alternatives) where helpful. Do not reduce volume or quality — only adjust load and exercise choice to be appropriate.
-- Not specified: use neutral defaults based on experience level and history.
+GENDER & LOAD: Male — typically higher suggested weights; female — appropriate loads and progressions. Use recent history when available to suggest progressions.
 
-TODAY TYPE: ${todayType === "rest" ? "Rest day but user may train — light recovery only." : todayType === "ai_decides" ? "You decide from fatigue." : todayType}
+TODAY'S SCHEDULED TYPE (generate for this day only): ${todayTypeLabel}
+${generateCardioOnly ? ">>> YOU MUST GENERATE ONLY A CARDIO/ACTIVE RECOVERY WORKOUT. NO LIFTING (no Push, Pull, Legs, Upper, Lower, Aesthetic strength). <<<" : todayType === "rest" ? "Generate a SIMPLE CARDIO workout. Only activities available at a basic gym: treadmill, bike, rower, elliptical. Duration-based. Respect modifications." : ""}
 
-${profile?.program_style === "aesthetic" ? `PROGRAM STYLE IS AESTHETIC: Tailor this workout entirely for aesthetics — proportions, symmetry, and hypertrophy for appearance. Choose exercises that build a balanced, aesthetic physique (e.g. shoulder development, arm symmetry, chest shape, back width). The "description" field MUST be a brief 2-3 sentence summary explaining why these exercises were chosen for the user's aesthetic goals; keep it concise so it fits on screen. Each exercise "why" can reference aesthetic benefit where relevant.` : ""}
+${programStyle === "aesthetic" ? `AESTHETIC PROGRAM: Prioritize muscle growth and hypertrophy while staying lean. Prefer higher volume (e.g. 3-4 sets, 8-12 reps), moderate weights; proportions and symmetry. Description must briefly explain why these exercises support the user's aesthetic goals (2-3 short sentences, fit on one screen).` : ""}
+${programStyle === "ai_optimal" ? `AI OPTIMAL: Fully optimize this workout using all data above; choose focus from fatigue and overall balance.` : ""}
 
 MUSCLE READINESS (same as Muscle Readiness diagram — analyze before choosing exercises; red <30% avoid primary; yellow 30-60 moderate; green >60 full; null = no data = available):
 ${Object.entries(fatigueMap || {}).map(([muscle, data]: [string, any]) => {
@@ -254,7 +304,17 @@ ${filteredExercises.map((e: any) => `- ID: ${e.id} | ${e.name} | Primary: ${e.pr
       );
     }
 
-    // Ensure description and primary_targets exist for client
+    if (typeof workoutPlan.name !== "string" || !workoutPlan.name.trim()) {
+      const fallback =
+        todayType === "push" ? "Push Day"
+        : todayType === "pull" ? "Pull Day"
+        : todayType === "legs" ? "Legs Day"
+        : todayType === "upper" ? "Upper Body"
+        : todayType === "lower" ? "Lower Body"
+        : todayType === "rest" ? "Cardio"
+        : "Today's Workout";
+      workoutPlan.name = fallback;
+    }
     if (typeof workoutPlan.description !== "string" || !workoutPlan.description.trim()) {
       workoutPlan.description =
         "Workout tailored to your program and available recovery. Check each exercise's Why? for specifics.";
