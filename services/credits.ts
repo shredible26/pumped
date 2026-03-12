@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type { Profile } from '@/types/user';
 
-const DAILY_LIMIT = 2;
+const DAILY_LIMIT = 3;
 
 function todayDateString(): string {
   return new Date().toISOString().split('T')[0];

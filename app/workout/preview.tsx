@@ -18,7 +18,7 @@ import { useWorkoutStore, ActiveExercise } from '@/stores/workoutStore';
 import { getTodaysPlan } from '@/services/ai';
 import { createSession } from '@/services/workouts';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
-import { getGenerationCreditsRemaining } from '@/services/credits';
+import { getGenerationCreditsRemaining, DAILY_LIMIT } from '@/services/credits';
 
 export default function WorkoutPreviewScreen() {
   const router = useRouter();
@@ -54,7 +54,7 @@ export default function WorkoutPreviewScreen() {
     if (remaining <= 0) {
       Alert.alert(
         'No generations left',
-        "You've used both daily generations. Try again tomorrow, or use Speed Log.",
+        `You've used all ${DAILY_LIMIT} daily generations. Try again tomorrow, or use Speed Log.`,
       );
       return;
     }

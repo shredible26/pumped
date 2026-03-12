@@ -181,10 +181,11 @@ export default function TodayScreen() {
       fetchSessionsForDate(selectedDate);
       fetchWeekWorkouts();
       refreshFatigue();
+      fetchCachedPlan();
       if (session?.user?.id && !isSameDay(selectedDate, new Date()) && !isAfter(startOfDay(selectedDate), startOfDay(new Date()))) {
         getHistoricalFatigueMap(session.user.id, selectedDate).then(setHistoricalFatigueMap);
       }
-    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, refreshFatigue, session?.user?.id])
+    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, refreshFatigue, fetchCachedPlan, session?.user?.id])
   );
 
   useEffect(() => {
@@ -444,6 +445,32 @@ export default function TodayScreen() {
 
         {isSelectedToday && isRestDay && (
           <>
+            {/* When a workout has been generated on Active Recovery, show card with View Workout only (Speed Log is in the Active Recovery card below) */}
+            {cachedPlan && (
+              <View style={styles.restDayGeneratedCardWrap}>
+                <View style={styles.workoutCard}>
+                  <View style={styles.workoutCardHeader}>
+                    <View style={styles.scheduledBadge}>
+                      <Text style={styles.scheduledBadgeText}>SCHEDULED</Text>
+                    </View>
+                    <View style={styles.workoutIconBox}>
+                      <Ionicons name="barbell" size={18} color={colors.accent.primary} />
+                    </View>
+                  </View>
+                  <Text style={styles.workoutType} numberOfLines={1} ellipsizeMode="tail">
+                    {cachedPlan.name}
+                  </Text>
+                  <Text style={styles.programName}>Active Recovery · AI Enhanced</Text>
+                  <Pressable
+                    style={styles.startButton}
+                    onPress={() => router.push('/workout/preview')}
+                  >
+                    <Ionicons name="play" size={18} color={colors.text.inverse} />
+                    <Text style={styles.startButtonText}>View Workout</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
             <View style={styles.restCard}>
               <Text style={styles.restEmoji}>🏃</Text>
               <Text style={styles.restTitle}>Active Recovery</Text>
@@ -837,6 +864,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  restDayGeneratedCardWrap: {
+    marginBottom: spacing.lg,
+  },
   restCard: {
     backgroundColor: colors.bg.card,
     marginHorizontal: spacing.xl,

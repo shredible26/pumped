@@ -22,6 +22,7 @@ import { generateWorkout, savePlanToCache } from '@/services/ai';
 import {
   getGenerationCreditsRemaining,
   consumeGenerationCredit,
+  DAILY_LIMIT,
 } from '@/services/credits';
 import { fetchExercises } from '@/services/exercises';
 import { supabase } from '@/services/supabase';
@@ -103,7 +104,7 @@ export default function ModificationsScreen() {
       if (remaining <= 0) {
         Alert.alert(
           'No generations left',
-          "You've used both daily generations. Try again tomorrow, or use Speed Log to manually log a workout.",
+          `You've used all ${DAILY_LIMIT} daily generations. Try again tomorrow, or use Speed Log to manually log a workout.`,
         );
         setCreditsRemaining(0);
         return;
@@ -257,9 +258,7 @@ export default function ModificationsScreen() {
                 <Text style={styles.creditsLine}>
                   {creditsRemaining === 0
                     ? 'No generations remaining today'
-                    : creditsRemaining === 1
-                      ? '1 generation remaining today'
-                      : '2 generations remaining today'}
+                    : `${creditsRemaining} of ${DAILY_LIMIT} generations remaining today`}
                 </Text>
               ) : null}
               <Pressable
