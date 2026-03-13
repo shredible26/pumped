@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { getLocalDateString } from '@/utils/date';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -100,7 +101,7 @@ export async function generateWorkout(params: GenerateWorkoutParams): Promise<Ge
 
 // Check if we already have a cached plan for today
 export async function getTodaysPlan(userId: string): Promise<GeneratedWorkout | null> {
-  const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const today = getLocalDateString();
 
   const { data, error } = await supabase
     .from("ai_workout_plans")
@@ -132,7 +133,7 @@ export async function savePlanToCache(
   userId: string,
   plan: GeneratedWorkout
 ): Promise<void> {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getLocalDateString();
 
   await supabase.from("ai_workout_plans").upsert(
     {

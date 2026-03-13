@@ -22,6 +22,7 @@ import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
 import { fetchSessionById, fetchSessionSets, deleteSession, updateSession } from '@/services/workouts';
+import { recalculateProfileMetrics } from '@/services/profileMetrics';
 import type { WorkoutSession, SetLog } from '@/types/workout';
 
 function groupSetsByExercise(sets: SetLog[]): { name: string; sets: SetLog[] }[] {
@@ -42,6 +43,7 @@ function groupSetsByExercise(sets: SetLog[]): { name: string; sets: SetLog[] }[]
 export default function SessionDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const authSession = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
   const units: Units = (profile as { units?: Units })?.units ?? 'lbs';
@@ -132,6 +134,12 @@ export default function SessionDetailScreen() {
             setDeleting(true);
             try {
               await deleteSession(id);
+              if (authSession?.user?.id) {
+                const updatedProfile = await recalculateProfileMetrics(authSession.user.id);
+                if (updatedProfile) {
+                  setProfile(updatedProfile as any);
+                }
+              }
               router.back();
             } catch (e: any) {
               Alert.alert('Error', e?.message || 'Failed to delete workout');

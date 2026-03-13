@@ -19,10 +19,12 @@ import { completeSession, insertSetLogs } from '@/services/workouts';
 import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
 import { updateProfileStreak } from '@/services/streak';
 import { fetchExercises } from '@/services/exercises';
+import type { SavedWorkoutExercise, SavedWorkoutSetDetail } from '@/services/savedWorkouts';
 import { supabase } from '@/services/supabase';
 import { e1rm } from '@/utils/epley';
 import { clearActiveWorkout } from '@/utils/storage';
 import { isDurationExercise } from '@/utils/exerciseUtils';
+import type { ActiveExercise, CompletedSet } from '@/stores/workoutStore';
 
 interface SummaryData {
   duration: number;
@@ -39,34 +41,99 @@ interface SummaryData {
 interface SavedWorkoutPayload {
   name: string;
   workoutType: string | null;
-  exercises: { name: string; sets: number }[];
+  exercises: SavedWorkoutExercise[];
 }
 
 function buildSavedWorkoutExercises(
-  setLogs: Array<{ exercise_name?: string | null; exercise_order?: number | null; set_number?: number | null }> | null | undefined,
+  setLogs:
+    | Array<{
+        exercise_name?: string | null;
+        exercise_order?: number | null;
+        set_number?: number | null;
+        actual_weight?: number | null;
+        actual_reps?: number | null;
+        actual_seconds?: number | null;
+      }>
+    | null
+    | undefined,
   fallbackName: string,
   fallbackSetCount = 1
 ): SavedWorkoutPayload['exercises'] {
   if (!setLogs || setLogs.length === 0) {
-    return [{ name: fallbackName, sets: Math.max(1, fallbackSetCount) }];
+    return [
+      {
+        name: fallbackName,
+        sets: Math.max(1, fallbackSetCount),
+        set_details: Array.from({ length: Math.max(1, fallbackSetCount) }, (_, index) => ({
+          set_number: index + 1,
+        })),
+      },
+    ];
   }
 
-  const grouped = new Map<number, { name: string; sets: number }>();
+  const grouped = new Map<number, { name: string; set_details: SavedWorkoutSetDetail[] }>();
 
   for (const log of setLogs) {
     const order = Number(log.exercise_order ?? 0);
     const existing = grouped.get(order) ?? {
       name: log.exercise_name ?? fallbackName,
-      sets: 0,
+      set_details: [],
     };
 
-    existing.sets = Math.max(existing.sets, Number(log.set_number ?? 1));
+    existing.set_details.push({
+      set_number: Number(log.set_number ?? existing.set_details.length + 1),
+      ...(log.actual_weight != null ? { weight: Number(log.actual_weight) } : {}),
+      ...(log.actual_reps != null ? { reps: Number(log.actual_reps) } : {}),
+      ...(log.actual_seconds != null ? { seconds: Number(log.actual_seconds) } : {}),
+    });
     grouped.set(order, existing);
   }
 
   return Array.from(grouped.entries())
     .sort(([a], [b]) => a - b)
-    .map(([, value]) => value);
+    .map(([, value]) => ({
+      name: value.name,
+      sets: value.set_details.length,
+      set_details: value.set_details.sort((a, b) => a.set_number - b.set_number),
+    }));
+}
+
+function buildSavedWorkoutExercisesFromCompletedSets(
+  activeExercises: ActiveExercise[],
+  loggedSets: CompletedSet[],
+): SavedWorkoutPayload['exercises'] {
+  const grouped = new Map<number, SavedWorkoutExercise>();
+
+  for (const completedSet of loggedSets) {
+    const exercise = activeExercises[completedSet.exerciseIndex];
+    if (!exercise) continue;
+
+    const existing = grouped.get(completedSet.exerciseIndex) ?? {
+      name: exercise.name,
+      sets: exercise.sets,
+      set_details: [],
+    };
+
+    const durationBased = isDurationExercise(exercise);
+    existing.set_details.push({
+      set_number: completedSet.setIndex + 1,
+      ...(completedSet.weight > 0 ? { weight: completedSet.weight } : {}),
+      ...(durationBased
+        ? completedSet.seconds != null
+          ? { seconds: completedSet.seconds }
+          : {}
+        : { reps: completedSet.reps }),
+    });
+    existing.sets = Math.max(existing.sets, existing.set_details.length);
+    grouped.set(completedSet.exerciseIndex, existing);
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, exercise]) => ({
+      ...exercise,
+      set_details: exercise.set_details.sort((a, b) => a.set_number - b.set_number),
+    }));
 }
 
 export default function WorkoutSummaryScreen() {
@@ -94,32 +161,13 @@ export default function WorkoutSummaryScreen() {
   const [saving, setSaving] = useState(true);
   const [displayName, setDisplayName] = useState(workoutName);
   const [savePayload, setSavePayload] = useState<SavedWorkoutPayload | null>(null);
-  const [saveState, setSaveState] = useState<'checking' | 'idle' | 'saving' | 'saved'>('checking');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const processedSessionRef = useRef<string | null>(null);
 
   const hydrateSaveState = useCallback(async (payload: SavedWorkoutPayload | null) => {
     setSavePayload(payload);
-
-    if (!payload || !session?.user?.id) {
-      setSaveState('idle');
-      return;
-    }
-
-    setSaveState('checking');
-    try {
-      const { data, error } = await supabase
-        .from('saved_workouts')
-        .select('id')
-        .eq('user_id', session.user.id)
-        .eq('name', payload.name)
-        .limit(1);
-
-      if (error) throw error;
-      setSaveState(data && data.length > 0 ? 'saved' : 'idle');
-    } catch {
-      setSaveState('idle');
-    }
-  }, [session?.user?.id]);
+    setSaveState('idle');
+  }, []);
 
   const loadSummaryFromSession = useCallback(async (sid: string) => {
     if (!session?.user?.id) {
@@ -139,7 +187,7 @@ export default function WorkoutSummaryScreen() {
         .single();
       const { data: setLogs } = await supabase
         .from('set_logs')
-        .select('exercise_name, exercise_order, set_number')
+        .select('exercise_name, exercise_order, set_number, actual_weight, actual_reps, actual_seconds')
         .eq('session_id', sid)
         .order('exercise_order')
         .order('set_number');
@@ -381,7 +429,7 @@ export default function WorkoutSummaryScreen() {
       await hydrateSaveState({
         name: workoutName || 'Workout',
         workoutType: null,
-        exercises: exercises.map((ex) => ({ name: ex.name, sets: ex.sets })),
+        exercises: buildSavedWorkoutExercisesFromCompletedSets(exercises, completedSets),
       });
 
       if (prs.length > 0) {
@@ -412,7 +460,7 @@ export default function WorkoutSummaryScreen() {
 
   const handleGoHome = () => {
     reset();
-    router.replace('/(tabs)');
+    router.dismissTo('/(tabs)');
   };
 
   const handleSaveWorkout = useCallback(async () => {
@@ -532,9 +580,9 @@ export default function WorkoutSummaryScreen() {
               saveState === 'saved' && styles.saveWorkoutButtonSaved,
             ]}
             onPress={handleSaveWorkout}
-            disabled={saveState === 'saving' || saveState === 'saved' || saveState === 'checking'}
+            disabled={saveState === 'saving' || saveState === 'saved'}
           >
-            {saveState === 'saving' || saveState === 'checking' ? (
+            {saveState === 'saving' ? (
               <ActivityIndicator color={colors.text.primary} />
             ) : (
               <>

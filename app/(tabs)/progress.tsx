@@ -19,7 +19,11 @@ import { format } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { formatWeight, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
-import { generateInsights, generateSuggestions, type Insight } from '@/services/insights';
+import {
+  generateSuggestions,
+  getProgressNarratives,
+  type Insight,
+} from '@/services/insights';
 import { getBig3, type Big3Result } from '@/services/strength';
 import {
   calculateMuscleDistribution,
@@ -35,6 +39,7 @@ import {
   type StrengthTrendExerciseOption,
 } from '@/services/strengthTrends';
 import { fetchCompletedWorkoutCount } from '@/services/workouts';
+import { supabase } from '@/services/supabase';
 import { useFocusEffect } from 'expo-router';
 
 const MUSCLE_LABELS: Record<string, string> = {
@@ -77,6 +82,7 @@ export default function ProgressScreen() {
   const [muscleDistribution, setMuscleDistribution] = useState<MuscleDistributionEntry[]>([]);
   const [distributionPeriod, setDistributionPeriod] = useState<'week' | 'month' | 'all'>('month');
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsRefreshing, setSuggestionsRefreshing] = useState(false);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
   const streak = profile?.current_streak_days ?? 0;
   const selectedStrengthTrendExerciseIdRef = useRef<string | null>(null);
@@ -84,6 +90,8 @@ export default function ProgressScreen() {
     ((options?: { preserveStrengthSelection?: boolean }) => Promise<void>) | null
   >(null);
   const hasLoadedProgressRef = useRef(false);
+  const hasHydratedFilterFetchRef = useRef(false);
+  const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadStrengthTrendData = useCallback(async (userId: string, exerciseId: string | null) => {
     if (!exerciseId) {
@@ -126,27 +134,25 @@ export default function ProgressScreen() {
     setStrengthTrendLoading(true);
     try {
       const [
-        insightsRes,
+        narrativesRes,
         big3Res,
         distRes,
         volRes,
-        suggestionsRes,
         strengthTrendOptionsRes,
         totalWorkoutsRes,
       ] = await Promise.all([
-        generateInsights(userId),
+        getProgressNarratives(userId),
         getBig3(userId),
         calculateMuscleDistribution(userId, distributionPeriod),
         getVolumeChartData(userId, volumePeriod),
-        generateSuggestions(userId),
         getStrengthTrendExerciseOptions(userId),
         fetchCompletedWorkoutCount(userId),
       ]);
-      setInsights(insightsRes);
+      setInsights(narrativesRes.insights);
       setBig3(big3Res);
       setMuscleDistribution(distRes);
       setVolumeData(volRes);
-      setSuggestions(suggestionsRes);
+      setSuggestions(narrativesRes.suggestions);
       setStrengthTrendOptions(strengthTrendOptionsRes);
       setTotalWorkouts(totalWorkoutsRes);
 
@@ -177,13 +183,15 @@ export default function ProgressScreen() {
     fetchDataRef.current = fetchData;
   }, [fetchData]);
 
+  useEffect(() => {
+    hasLoadedProgressRef.current = false;
+    hasHydratedFilterFetchRef.current = false;
+  }, [session?.user?.id]);
+
   useFocusEffect(
     useCallback(() => {
-      if (!session?.user?.id) {
-        return;
-      }
-
       resetStrengthTrendSelection();
+      if (!session?.user?.id || hasLoadedProgressRef.current) return;
       hasLoadedProgressRef.current = true;
       void fetchDataRef.current?.({ preserveStrengthSelection: false });
     }, [session?.user?.id, resetStrengthTrendSelection]),
@@ -191,8 +199,69 @@ export default function ProgressScreen() {
 
   useEffect(() => {
     if (!hasLoadedProgressRef.current || !session?.user?.id) return;
+    if (!hasHydratedFilterFetchRef.current) {
+      hasHydratedFilterFetchRef.current = true;
+      return;
+    }
     void fetchData({ preserveStrengthSelection: true });
   }, [distributionPeriod, volumePeriod, session?.user?.id, fetchData]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const userId = session.user.id;
+    const scheduleRefresh = () => {
+      if (!hasLoadedProgressRef.current) return;
+      if (autoRefreshTimeoutRef.current) {
+        clearTimeout(autoRefreshTimeoutRef.current);
+      }
+      autoRefreshTimeoutRef.current = setTimeout(() => {
+        void fetchDataRef.current?.({ preserveStrengthSelection: true });
+      }, 250);
+    };
+
+    const channel = supabase
+      .channel(`progress-updates-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'workout_sessions',
+          filter: `user_id=eq.${userId}`,
+        },
+        scheduleRefresh,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${userId}`,
+        },
+        scheduleRefresh,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'muscle_strain_log',
+          filter: `user_id=eq.${userId}`,
+        },
+        scheduleRefresh,
+      )
+      .subscribe();
+
+    return () => {
+      if (autoRefreshTimeoutRef.current) {
+        clearTimeout(autoRefreshTimeoutRef.current);
+        autoRefreshTimeoutRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -234,6 +303,35 @@ export default function ProgressScreen() {
     setStrengthTrendPickerOpen(false);
     setStrengthTrendSearchQuery('');
   }, []);
+
+  const handleRegenerateSuggestions = useCallback(async () => {
+    if (!session?.user?.id || needsMoreWorkouts || suggestionsRefreshing) return;
+
+    setSuggestionsRefreshing(true);
+    try {
+      let nextSuggestions = await generateSuggestions(session.user.id, {
+        excludeSuggestions: suggestions,
+        variationSeed: Date.now(),
+      });
+
+      if (nextSuggestions.join('||') === suggestions.join('||')) {
+        nextSuggestions = await generateSuggestions(session.user.id, {
+          variationSeed: Date.now() + 1,
+        });
+      }
+
+      setSuggestions(nextSuggestions);
+    } catch (error) {
+      console.warn('Suggestions refresh error', error);
+    } finally {
+      setSuggestionsRefreshing(false);
+    }
+  }, [
+    needsMoreWorkouts,
+    session?.user?.id,
+    suggestions,
+    suggestionsRefreshing,
+  ]);
 
   const insightIconColor = (type: Insight['type']) => {
     if (type === 'positive') return colors.accent.primary;
@@ -335,6 +433,21 @@ export default function ProgressScreen() {
                 </Text>
               ))}
             </View>
+            <Pressable
+              style={[
+                styles.suggestionsRegenerateButton,
+                suggestionsRefreshing && styles.suggestionsRegenerateButtonDisabled,
+              ]}
+              onPress={() => void handleRegenerateSuggestions()}
+              disabled={suggestionsRefreshing}
+            >
+              {suggestionsRefreshing ? (
+                <ActivityIndicator size="small" color={colors.accent.primary} />
+              ) : (
+                <Ionicons name="refresh" size={16} color={colors.accent.primary} />
+              )}
+              <Text style={styles.suggestionsRegenerateButtonText}>Regenerate</Text>
+            </Pressable>
           </>
         )}
 
@@ -941,6 +1054,28 @@ const styles = StyleSheet.create({
     fontSize: font.md,
     color: colors.text.secondary,
     lineHeight: 22,
+  },
+  suggestionsRegenerateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    backgroundColor: colors.accent.bg,
+    marginBottom: spacing.sm,
+  },
+  suggestionsRegenerateButtonDisabled: {
+    opacity: 0.7,
+  },
+  suggestionsRegenerateButtonText: {
+    fontSize: font.sm,
+    fontWeight: '700',
+    color: colors.accent.primary,
   },
 
   scoreCard: {

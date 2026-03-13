@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { format, subDays } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
+import { usePlanStore } from '@/stores/planStore';
 import { useFatigue } from '@/hooks/useFatigue';
 import { generateWorkout, savePlanToCache } from '@/services/ai';
 import {
@@ -26,6 +27,7 @@ import {
 } from '@/services/credits';
 import { fetchExercises } from '@/services/exercises';
 import { supabase } from '@/services/supabase';
+import { getLocalDateString } from '@/utils/date';
 
 const SUGGESTION_PILLS = [
   'Quick workout (30 min)',
@@ -41,8 +43,9 @@ export default function ModificationsScreen() {
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
+  const setTodaysPlan = usePlanStore((s) => s.setTodaysPlan);
 
-  const { fatigueMap, refreshFatigue } = useFatigue();
+  const { refreshFatigue } = useFatigue();
   const [modifications, setModifications] = useState('');
   const [generating, setGenerating] = useState(false);
   const [exercises, setExercises] = useState<any[]>([]);
@@ -89,7 +92,7 @@ export default function ModificationsScreen() {
   }, [session?.user?.id, refreshFatigue, profile?.id]);
 
   const handleGenerate = useCallback(
-    async (withMods: boolean) => {
+    async () => {
       if (!session?.user?.id || !profile) {
         Alert.alert('Error', 'Please complete your profile first.');
         return;
@@ -142,11 +145,12 @@ export default function ModificationsScreen() {
             equipment: e.equipment,
             difficulty: e.difficulty,
           })),
-          modifications: withMods ? modifications.trim() : undefined,
+          modifications: modifications.trim() || undefined,
           planDayOfWeek: new Date().getDay(),
         });
 
         await savePlanToCache(session.user.id, plan);
+        setTodaysPlan(session.user.id, getLocalDateString(), plan);
         await consumeGenerationCredit(session.user.id, remaining);
         const nextCredits = Math.max(0, remaining - 1);
         setCreditsRemaining(nextCredits);
@@ -174,11 +178,11 @@ export default function ModificationsScreen() {
       session?.user?.id,
       profile,
       setProfile,
-      fatigueMap,
       recentHistory,
       exercises,
       modifications,
       router,
+      setTodaysPlan,
     ]
   );
 
@@ -263,21 +267,11 @@ export default function ModificationsScreen() {
               ) : null}
               <Pressable
                 style={styles.generateButton}
-                onPress={() => handleGenerate(true)}
+                onPress={() => void handleGenerate()}
                 disabled={!ready}
               >
                 <Ionicons name="sparkles" size={20} color={colors.text.inverse} />
                 <Text style={styles.generateButtonText}>Generate Workout</Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.generateWithoutButton}
-                onPress={() => handleGenerate(false)}
-                disabled={!ready}
-              >
-                <Text style={styles.generateWithoutText}>
-                  Generate without modifications
-                </Text>
               </Pressable>
             </>
           )}
@@ -393,23 +387,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text.inverse,
   },
-  generateWithoutButton: {
-    paddingVertical: spacing.lg,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border.light,
-    borderRadius: radius.md,
-    backgroundColor: colors.bg.card,
-  },
   creditsLine: {
     fontSize: font.sm,
     color: colors.text.tertiary,
     textAlign: 'center',
     marginBottom: spacing.sm,
-  },
-  generateWithoutText: {
-    fontSize: font.md,
-    fontWeight: '600',
-    color: colors.text.secondary,
   },
 });

@@ -86,6 +86,12 @@ export async function insertSetLogs(sets: Partial<SetLog>[]): Promise<void> {
 
 /** Delete a completed session (and its set_logs via DB cascade). Call after confirming with user. */
 export async function deleteSession(sessionId: string): Promise<void> {
+  const { error: strainError } = await supabase
+    .from('muscle_strain_log')
+    .delete()
+    .eq('session_id', sessionId);
+  if (strainError) throw strainError;
+
   const { error } = await supabase
     .from('workout_sessions')
     .delete()

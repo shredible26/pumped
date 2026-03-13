@@ -21,6 +21,7 @@ import {
 } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
+import { getStoredTodaysPlan, usePlanStore } from '@/stores/planStore';
 import { useFatigue } from '@/hooks/useFatigue';
 import { supabase } from '@/services/supabase';
 import { getTodaysPlan } from '@/services/ai';
@@ -33,6 +34,7 @@ import RoutineTimeline from '@/components/home/RoutineTimeline';
 import type { GeneratedWorkout } from '@/services/ai';
 import { fetchCompletedWorkoutCount } from '@/services/workouts';
 import { getWorkoutTypeForDate, getDisplayWorkoutType } from '@/utils/schedule';
+import { getLocalDateString } from '@/utils/date';
 
 const PROGRAM_LABELS: Record<string, string> = {
   ppl: 'Push/Pull/Legs',
@@ -55,6 +57,8 @@ export default function TodayScreen() {
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
+  const setTodaysPlan = usePlanStore((s) => s.setTodaysPlan);
+  const clearTodaysPlan = usePlanStore((s) => s.clearTodaysPlan);
 
   const { fatigueMap, refreshFatigue } = useFatigue();
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -120,10 +124,26 @@ export default function TodayScreen() {
   }, [session?.user?.id]);
 
   const fetchCachedPlan = useCallback(async () => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      setCachedPlan(null);
+      return;
+    }
+
+    const planDate = getLocalDateString();
+    const storedPlan = getStoredTodaysPlan(session.user.id, planDate);
+    if (storedPlan) {
+      setCachedPlan(storedPlan);
+    }
+
     const plan = await getTodaysPlan(session.user.id);
-    setCachedPlan(plan);
-  }, [session?.user?.id]);
+    if (plan) {
+      setTodaysPlan(session.user.id, planDate, plan);
+      setCachedPlan(plan);
+    } else if (!storedPlan) {
+      clearTodaysPlan(session.user.id);
+      setCachedPlan(null);
+    }
+  }, [clearTodaysPlan, session?.user?.id, setTodaysPlan]);
 
   const fetchSessionsForDate = useCallback(
     async (date: Date) => {

@@ -54,7 +54,7 @@ export default function SpeedLogSaveScreen() {
       router.replace(`/workout/summary?sessionId=${sessionId}`);
       return;
     }
-    router.replace('/(tabs)');
+    router.dismissTo('/(tabs)');
   }
 
   return (

@@ -16,6 +16,7 @@ import { parseLocalDate, getLocalDateString } from '@/utils/date';
 import { formatVolumeCompact, type Units } from '@/utils/units';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
+import { normalizeSavedWorkoutExercises } from '@/services/savedWorkouts';
 
 interface PastWorkoutRow {
   id: string;
@@ -117,11 +118,6 @@ export default function WorkoutsScreen() {
     return true;
   });
 
-  const deleteSaved = async (id: string) => {
-    await supabase.from('saved_workouts').delete().eq('id', id);
-    setSavedWorkouts((prev) => prev.filter((w) => w.id !== id));
-  };
-
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -216,17 +212,12 @@ export default function WorkoutsScreen() {
         <Text style={styles.sectionHeader}>Saved Workouts</Text>
         {savedWorkouts.length > 0 &&
           savedWorkouts.map((sw) => {
-            const exCount = Array.isArray(sw.exercises) ? sw.exercises.length : 0;
+            const exCount = normalizeSavedWorkoutExercises(sw.exercises).length;
             return (
               <Pressable
                 key={sw.id}
                 style={styles.savedCard}
-                onPress={() =>
-                  router.push({
-                    pathname: '/speedlog/editor',
-                    params: { type: sw.workout_type ?? 'Custom' },
-                  })
-                }
+                onPress={() => router.push(`/workout/saved/${sw.id}`)}
               >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.savedName}>{sw.name}</Text>
@@ -237,12 +228,11 @@ export default function WorkoutsScreen() {
                       : ''}
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() => deleteSaved(sw.id)}
-                  hitSlop={12}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.text.tertiary} />
-                </Pressable>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color={colors.text.tertiary}
+                />
               </Pressable>
             );
           })}

@@ -127,7 +127,7 @@ export default function ActiveWorkoutScreen() {
             router.replace('/workout/summary');
           } else {
             reset();
-            router.replace('/(tabs)');
+            router.dismissTo('/(tabs)');
           }
         },
       },
@@ -152,7 +152,7 @@ export default function ActiveWorkoutScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.centerContent}>
           <Text style={styles.emptyText}>No workout loaded</Text>
-          <Pressable style={styles.backBtn} onPress={() => router.replace('/(tabs)')}>
+          <Pressable style={styles.backBtn} onPress={() => router.dismissTo('/(tabs)')}>
             <Text style={styles.backBtnText}>Go Home</Text>
           </Pressable>
         </View>

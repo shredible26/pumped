@@ -14,29 +14,52 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
-import { useWorkoutStore, ActiveExercise } from '@/stores/workoutStore';
+import { getStoredTodaysPlan, usePlanStore } from '@/stores/planStore';
+import { useWorkoutStore } from '@/stores/workoutStore';
 import { getTodaysPlan } from '@/services/ai';
-import { createSession } from '@/services/workouts';
+import type { SavedWorkoutExercise } from '@/services/savedWorkouts';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
 import { getGenerationCreditsRemaining, DAILY_LIMIT } from '@/services/credits';
 import { supabase } from '@/services/supabase';
+import { getLocalDateString } from '@/utils/date';
 
 export default function WorkoutPreviewScreen() {
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
-  const startSession = useWorkoutStore((s) => s.startSession);
+  const setTodaysPlan = usePlanStore((s) => s.setTodaysPlan);
+  const clearTodaysPlan = usePlanStore((s) => s.clearTodaysPlan);
 
   const [plan, setPlan] = useState<GeneratedWorkout | null>(null);
   const [loading, setLoading] = useState(true);
   const [whyExercise, setWhyExercise] = useState<GeneratedExercise | null>(null);
 
   const fetchPlan = useCallback(async () => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      setPlan(null);
+      setLoading(false);
+      return;
+    }
+
+    const planDate = getLocalDateString();
+    const storedPlan = getStoredTodaysPlan(session.user.id, planDate);
+    if (storedPlan) {
+      setPlan(storedPlan);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     const p = await getTodaysPlan(session.user.id);
-    setPlan(p);
+    if (p) {
+      setTodaysPlan(session.user.id, planDate, p);
+      setPlan(p);
+    } else if (!storedPlan) {
+      clearTodaysPlan(session.user.id);
+      setPlan(null);
+    }
     setLoading(false);
-  }, [session?.user?.id]);
+  }, [clearTodaysPlan, session?.user?.id, setTodaysPlan]);
 
   useEffect(() => {
     fetchPlan();
@@ -53,14 +76,28 @@ export default function WorkoutPreviewScreen() {
   const handleSaveWorkout = async () => {
     if (!session?.user?.id || !plan) return;
     try {
+      const savedExercises: SavedWorkoutExercise[] = (plan.exercises ?? []).map((ex) => {
+        const parsedReps = parseInt(ex.target_reps.split('-')[0] ?? '0', 10) || 0;
+        return {
+          name: ex.name,
+          sets: ex.sets,
+          set_details: Array.from({ length: ex.sets }, (_, index) => ({
+            set_number: index + 1,
+            ...(ex.target_weight_lbs > 0 ? { weight: ex.target_weight_lbs } : {}),
+            ...(ex.target_seconds != null
+              ? { seconds: ex.target_seconds }
+              : parsedReps > 0
+                ? { reps: parsedReps }
+                : {}),
+          })),
+        };
+      });
+
       await supabase.from('saved_workouts').insert({
         user_id: session.user.id,
         name: plan.name || 'My Workout',
         workout_type: (plan.type ?? null) as any,
-        exercises: (plan.exercises ?? []).map((ex) => ({
-          name: ex.name,
-          sets: ex.sets,
-        })),
+        exercises: savedExercises,
         last_used_at: new Date().toISOString(),
         use_count: 1,
       });
@@ -71,7 +108,7 @@ export default function WorkoutPreviewScreen() {
   };
 
   const handleDone = () => {
-    router.replace('/(tabs)');
+    router.dismissTo('/(tabs)');
   };
 
   const handleCustomize = async () => {
@@ -121,12 +158,12 @@ export default function WorkoutPreviewScreen() {
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>🤖</Text>
           <Text style={styles.emptyTitle}>No workout planned</Text>
-          <Text style={styles.emptySubtext}>
-            No AI workout available for today. Generate one from the home screen or log a custom workout.
-          </Text>
+            <Text style={styles.emptySubtext}>
+              No AI workout available for today. Generate one from the home screen or log a custom workout.
+            </Text>
           <Pressable
             style={styles.customButton}
-            onPress={() => router.replace('/(tabs)')}
+            onPress={() => router.dismissTo('/(tabs)')}
           >
             <Text style={styles.customButtonText}>Back to Today</Text>
           </Pressable>
@@ -147,7 +184,7 @@ export default function WorkoutPreviewScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={() => router.dismiss()}>
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Today's Workout</Text>
