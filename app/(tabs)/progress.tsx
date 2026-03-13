@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,13 @@ import {
   Pressable,
   RefreshControl,
   Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { format } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { formatWeight, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
@@ -22,6 +26,13 @@ import {
   type MuscleDistributionEntry,
   type VolumeEntry,
 } from '@/services/volume';
+import StrengthTrendChart from '@/components/progress/StrengthTrendChart';
+import {
+  getStrengthTrendData,
+  getStrengthTrendExerciseOptions,
+  type StrengthTrendData,
+  type StrengthTrendExerciseOption,
+} from '@/services/strengthTrends';
 import { useFocusEffect } from 'expo-router';
 
 const MUSCLE_LABELS: Record<string, string> = {
@@ -49,6 +60,13 @@ export default function ProgressScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [big3, setBig3] = useState<Big3Result | null>(null);
+  const [strengthTrendOptions, setStrengthTrendOptions] = useState<StrengthTrendExerciseOption[]>([]);
+  const [selectedStrengthTrendExerciseId, setSelectedStrengthTrendExerciseId] = useState<string | null>(null);
+  const selectedStrengthTrendExerciseIdRef = useRef<string | null>(null);
+  const [strengthTrendData, setStrengthTrendData] = useState<StrengthTrendData | null>(null);
+  const [strengthTrendLoading, setStrengthTrendLoading] = useState(false);
+  const [strengthTrendPickerOpen, setStrengthTrendPickerOpen] = useState(false);
+  const [strengthTrendSearchQuery, setStrengthTrendSearchQuery] = useState('');
   const [volumePeriod, setVolumePeriod] = useState<'week' | 'month' | 'year'>('week');
   const [volumeData, setVolumeData] = useState<{ entries: VolumeEntry[]; total: number }>({
     entries: [],
@@ -60,22 +78,56 @@ export default function ProgressScreen() {
   const [totalWorkouts, setTotalWorkouts] = useState(0);
   const streak = profile?.current_streak_days ?? 0;
 
+  const loadStrengthTrendData = useCallback(async (userId: string, exerciseId: string | null) => {
+    if (!exerciseId) {
+      setStrengthTrendData(null);
+      setStrengthTrendLoading(false);
+      return;
+    }
+
+    setStrengthTrendLoading(true);
+    try {
+      const data = await getStrengthTrendData(userId, exerciseId);
+      setStrengthTrendData(data);
+    } catch (error) {
+      console.warn('Strength trend fetch error', error);
+      setStrengthTrendData(null);
+    } finally {
+      setStrengthTrendLoading(false);
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     if (!session?.user?.id) return;
     const userId = session.user.id;
+    setStrengthTrendLoading(true);
     try {
-      const [insightsRes, big3Res, distRes, volRes, suggestionsRes] = await Promise.all([
+      const [insightsRes, big3Res, distRes, volRes, suggestionsRes, strengthTrendOptionsRes] = await Promise.all([
         generateInsights(userId),
         getBig3(userId),
         calculateMuscleDistribution(userId, distributionPeriod),
         getVolumeChartData(userId, volumePeriod),
         generateSuggestions(userId),
+        getStrengthTrendExerciseOptions(userId),
       ]);
       setInsights(insightsRes);
       setBig3(big3Res);
       setMuscleDistribution(distRes);
       setVolumeData(volRes);
       setSuggestions(suggestionsRes);
+      setStrengthTrendOptions(strengthTrendOptionsRes);
+
+      const resolvedStrengthTrendExerciseId =
+        selectedStrengthTrendExerciseIdRef.current &&
+        strengthTrendOptionsRes.some(
+          (option) => option.exerciseId === selectedStrengthTrendExerciseIdRef.current,
+        )
+          ? selectedStrengthTrendExerciseIdRef.current
+          : strengthTrendOptionsRes[0]?.exerciseId ?? null;
+
+      selectedStrengthTrendExerciseIdRef.current = resolvedStrengthTrendExerciseId;
+      setSelectedStrengthTrendExerciseId(resolvedStrengthTrendExerciseId);
+      await loadStrengthTrendData(userId, resolvedStrengthTrendExerciseId);
 
       const { data: sessions } = await supabase
         .from('workout_sessions')
@@ -86,8 +138,9 @@ export default function ProgressScreen() {
       setTotalWorkouts(workoutsOnly.length);
     } catch (e) {
       console.warn('Progress fetch error', e);
+      setStrengthTrendLoading(false);
     }
-  }, [session?.user?.id, distributionPeriod, volumePeriod]);
+  }, [session?.user?.id, distributionPeriod, volumePeriod, loadStrengthTrendData]);
 
   useEffect(() => {
     fetchData();
@@ -107,6 +160,33 @@ export default function ProgressScreen() {
 
   const needsMoreWorkouts = totalWorkouts < 5;
   const maxChartVol = Math.max(...volumeData.entries.map((e) => e.volume), 1);
+  const selectedStrengthTrendExercise = useMemo(
+    () =>
+      strengthTrendOptions.find(
+        (option) => option.exerciseId === selectedStrengthTrendExerciseId,
+      ) ?? null,
+    [strengthTrendOptions, selectedStrengthTrendExerciseId],
+  );
+  const filteredStrengthTrendOptions = useMemo(() => {
+    const query = strengthTrendSearchQuery.trim().toLowerCase();
+    if (!query) return strengthTrendOptions;
+
+    return strengthTrendOptions.filter((option) =>
+      option.exerciseName.toLowerCase().includes(query),
+    );
+  }, [strengthTrendOptions, strengthTrendSearchQuery]);
+
+  const handleSelectStrengthTrendExercise = useCallback(
+    (exerciseId: string) => {
+      if (!session?.user?.id) return;
+      selectedStrengthTrendExerciseIdRef.current = exerciseId;
+      setSelectedStrengthTrendExerciseId(exerciseId);
+      setStrengthTrendPickerOpen(false);
+      setStrengthTrendSearchQuery('');
+      void loadStrengthTrendData(session.user.id, exerciseId);
+    },
+    [session?.user?.id, loadStrengthTrendData],
+  );
 
   const insightIconColor = (type: Insight['type']) => {
     if (type === 'positive') return colors.accent.primary;
@@ -251,6 +331,147 @@ export default function ProgressScreen() {
             <Ionicons name="trophy-outline" size={36} color={colors.text.tertiary} />
             <Text style={styles.emptyBig3Text}>
               Log bench, squat, or deadlift to see your Big 3.
+            </Text>
+          </View>
+        )}
+
+        {/* Strength Trends */}
+        <View style={styles.sectionHeaderRow}>
+          <Ionicons name="trending-up" size={16} color={colors.text.secondary} />
+          <Text style={styles.sectionHeader}>Strength Trends</Text>
+        </View>
+
+        {strengthTrendLoading && strengthTrendOptions.length === 0 ? (
+          <View style={styles.strengthTrendLoadingCard}>
+            <ActivityIndicator color={colors.accent.primary} />
+            <Text style={styles.strengthTrendLoadingText}>
+              Loading weighted exercises...
+            </Text>
+          </View>
+        ) : strengthTrendOptions.length > 0 ? (
+          <>
+            <Pressable
+              style={styles.strengthTrendSelector}
+              onPress={() => setStrengthTrendPickerOpen(true)}
+            >
+              <View style={styles.strengthTrendSelectorCopy}>
+                <Text style={styles.strengthTrendSelectorLabel}>Selected exercise</Text>
+                <Text style={styles.strengthTrendSelectorValue}>
+                  {selectedStrengthTrendExercise?.exerciseName ?? 'Choose an exercise'}
+                </Text>
+                <Text style={styles.strengthTrendSelectorMeta}>
+                  {selectedStrengthTrendExercise
+                    ? `${selectedStrengthTrendExercise.sessionCount} workout${
+                        selectedStrengthTrendExercise.sessionCount === 1 ? '' : 's'
+                      } tracked${
+                        selectedStrengthTrendExercise.lastLoggedDate
+                          ? ` · Last logged ${format(
+                              new Date(
+                                `${selectedStrengthTrendExercise.lastLoggedDate}T12:00:00`,
+                              ),
+                              'MMM d',
+                            )}`
+                          : ''
+                      }`
+                    : 'Only weighted exercises appear here'}
+                </Text>
+              </View>
+              <View style={styles.strengthTrendSelectorIcon}>
+                <Ionicons name="chevron-down" size={18} color={colors.text.primary} />
+              </View>
+            </Pressable>
+
+            {strengthTrendLoading ? (
+              <View style={styles.strengthTrendLoadingCard}>
+                <ActivityIndicator color={colors.accent.primary} />
+                <Text style={styles.strengthTrendLoadingText}>
+                  Building your trend line...
+                </Text>
+              </View>
+            ) : strengthTrendData && strengthTrendData.points.length > 0 ? (
+              <>
+                <StrengthTrendChart
+                  exerciseName={strengthTrendData.exerciseName}
+                  points={strengthTrendData.points}
+                  units={units}
+                />
+
+                <View style={styles.strengthTrendMetricGrid}>
+                  <View style={styles.strengthTrendMetricCard}>
+                    <Text style={styles.strengthTrendMetricLabel}>Actual max</Text>
+                    <Text style={styles.strengthTrendMetricValue}>
+                      {strengthTrendData.actualMax
+                        ? formatWeight(strengthTrendData.actualMax.value, units)
+                        : '—'}
+                    </Text>
+                    <Text style={styles.strengthTrendMetricSubtext}>
+                      {strengthTrendData.actualMax?.reps
+                        ? `${formatWeight(
+                            strengthTrendData.actualMax.weight,
+                            units,
+                          )} x ${strengthTrendData.actualMax.reps}`
+                        : 'No top set recorded yet'}
+                    </Text>
+                    <Text style={styles.strengthTrendMetricCaption}>
+                      {strengthTrendData.actualMax
+                        ? `${strengthTrendData.actualMax.sessionName} · ${format(
+                            new Date(`${strengthTrendData.actualMax.sessionDate}T12:00:00`),
+                            'MMM d, yyyy',
+                          )}`
+                        : 'Tracked from completed workouts'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.strengthTrendMetricCard}>
+                    <Text style={styles.strengthTrendMetricLabel}>Estimated 1RM</Text>
+                    <Text style={styles.strengthTrendMetricValue}>
+                      {strengthTrendData.estimatedOneRepMax
+                        ? formatWeight(strengthTrendData.estimatedOneRepMax.value, units)
+                        : '—'}
+                    </Text>
+                    <Text style={styles.strengthTrendMetricSubtext}>
+                      {strengthTrendData.estimatedOneRepMax?.reps
+                        ? `Based on ${formatWeight(
+                            strengthTrendData.estimatedOneRepMax.weight,
+                            units,
+                          )} x ${strengthTrendData.estimatedOneRepMax.reps}`
+                        : 'Needs a logged weight and rep count'}
+                    </Text>
+                    <Text style={styles.strengthTrendMetricCaption}>
+                      {strengthTrendData.estimatedOneRepMax
+                        ? `${strengthTrendData.estimatedOneRepMax.sessionName} · ${format(
+                            new Date(
+                              `${strengthTrendData.estimatedOneRepMax.sessionDate}T12:00:00`,
+                            ),
+                            'MMM d, yyyy',
+                          )}`
+                        : 'We will calculate this as more sets are logged'}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <View style={styles.strengthTrendEmptyCard}>
+                <Ionicons name="analytics-outline" size={34} color={colors.text.tertiary} />
+                <Text style={styles.strengthTrendEmptyTitle}>
+                  No weighted sets recorded yet
+                </Text>
+                <Text style={styles.strengthTrendEmptyText}>
+                  Log a weighted set for this exercise to unlock a trend line, actual max,
+                  and estimated 1RM.
+                </Text>
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={styles.strengthTrendEmptyCard}>
+            <Ionicons name="barbell-outline" size={34} color={colors.text.tertiary} />
+            <Text style={styles.strengthTrendEmptyTitle}>
+              Strength Trends unlock with weighted lifts
+            </Text>
+            <Text style={styles.strengthTrendEmptyText}>
+              Barbell, dumbbell, machine, cable, and kettlebell exercises will appear here
+              after you log them. Cardio and bodyweight movements are excluded.
             </Text>
           </View>
         )}
@@ -409,6 +630,114 @@ export default function ProgressScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal
+        visible={strengthTrendPickerOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setStrengthTrendPickerOpen(false)}
+      >
+        <View style={styles.strengthTrendModalBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setStrengthTrendPickerOpen(false)}
+          />
+          <View style={styles.strengthTrendModalCard}>
+            <View style={styles.strengthTrendModalHandle} />
+            <View style={styles.strengthTrendModalHeader}>
+              <View>
+                <Text style={styles.strengthTrendModalTitle}>Choose an exercise</Text>
+                <Text style={styles.strengthTrendModalSubtitle}>
+                  Only weighted exercises you&apos;ve logged appear here.
+                </Text>
+              </View>
+              <Pressable
+                style={styles.strengthTrendModalClose}
+                onPress={() => setStrengthTrendPickerOpen(false)}
+              >
+                <Ionicons name="close" size={18} color={colors.text.primary} />
+              </Pressable>
+            </View>
+
+            <View style={styles.strengthTrendSearchRow}>
+              <Ionicons name="search" size={16} color={colors.text.tertiary} />
+              <TextInput
+                style={styles.strengthTrendSearchInput}
+                value={strengthTrendSearchQuery}
+                onChangeText={setStrengthTrendSearchQuery}
+                placeholder="Search exercises"
+                placeholderTextColor={colors.text.tertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
+            <ScrollView
+              style={styles.strengthTrendModalList}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {filteredStrengthTrendOptions.length > 0 ? (
+                filteredStrengthTrendOptions.map((option) => {
+                  const isSelected = option.exerciseId === selectedStrengthTrendExerciseId;
+                  return (
+                    <Pressable
+                      key={option.exerciseId}
+                      style={[
+                        styles.strengthTrendOptionRow,
+                        isSelected && styles.strengthTrendOptionRowSelected,
+                      ]}
+                      onPress={() => handleSelectStrengthTrendExercise(option.exerciseId)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.strengthTrendOptionName,
+                            isSelected && styles.strengthTrendOptionNameSelected,
+                          ]}
+                        >
+                          {option.exerciseName}
+                        </Text>
+                        <Text style={styles.strengthTrendOptionMeta}>
+                          {option.sessionCount} workout
+                          {option.sessionCount === 1 ? '' : 's'}
+                          {option.lastLoggedDate
+                            ? ` · ${format(
+                                new Date(`${option.lastLoggedDate}T12:00:00`),
+                                'MMM d, yyyy',
+                              )}`
+                            : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.strengthTrendOptionRight}>
+                        {option.latestWeight ? (
+                          <Text style={styles.strengthTrendOptionWeight}>
+                            {formatWeight(option.latestWeight, units)}
+                          </Text>
+                        ) : null}
+                        {isSelected ? (
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={20}
+                            color={colors.accent.primary}
+                          />
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })
+              ) : (
+                <View style={styles.strengthTrendModalEmpty}>
+                  <Ionicons name="search-outline" size={26} color={colors.text.tertiary} />
+                  <Text style={styles.strengthTrendModalEmptyText}>
+                    No exercises match that search.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -580,6 +909,242 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   emptyBig3Text: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    textAlign: 'center',
+  },
+
+  strengthTrendSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  strengthTrendSelectorCopy: {
+    flex: 1,
+  },
+  strengthTrendSelectorLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  strengthTrendSelectorValue: {
+    fontSize: font.xl,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: 4,
+  },
+  strengthTrendSelectorMeta: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  strengthTrendSelectorIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.bg.input,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  strengthTrendLoadingCard: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  strengthTrendLoadingText: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+  },
+  strengthTrendMetricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  strengthTrendMetricCard: {
+    flex: 1,
+    minWidth: '47%',
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.lg,
+  },
+  strengthTrendMetricLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  strengthTrendMetricValue: {
+    fontSize: font.xxl,
+    fontWeight: '800',
+    color: colors.text.primary,
+    marginTop: spacing.xs,
+  },
+  strengthTrendMetricSubtext: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+    lineHeight: 18,
+  },
+  strengthTrendMetricCaption: {
+    fontSize: font.sm,
+    color: colors.text.tertiary,
+    marginTop: spacing.sm,
+    lineHeight: 18,
+  },
+  strengthTrendEmptyCard: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  strengthTrendEmptyTitle: {
+    fontSize: font.lg,
+    fontWeight: '700',
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  strengthTrendEmptyText: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  strengthTrendModalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(6, 10, 16, 0.72)',
+  },
+  strengthTrendModalCard: {
+    backgroundColor: colors.bg.primary,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxxl,
+    minHeight: '72%',
+    borderTopWidth: 1,
+    borderColor: colors.border.default,
+  },
+  strengthTrendModalHandle: {
+    alignSelf: 'center',
+    width: 52,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: colors.border.default,
+    marginBottom: spacing.lg,
+  },
+  strengthTrendModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  strengthTrendModalTitle: {
+    fontSize: font.xxl,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  strengthTrendModalSubtitle: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+  strengthTrendModalClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  strengthTrendSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.lg,
+  },
+  strengthTrendSearchInput: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    fontSize: font.md,
+    color: colors.text.primary,
+  },
+  strengthTrendModalList: {
+    marginTop: spacing.lg,
+  },
+  strengthTrendOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  strengthTrendOptionRowSelected: {
+    backgroundColor: colors.accent.bg,
+    borderColor: colors.accent.primary,
+  },
+  strengthTrendOptionName: {
+    fontSize: font.md,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  strengthTrendOptionNameSelected: {
+    color: colors.accent.primary,
+  },
+  strengthTrendOptionMeta: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    marginTop: 4,
+  },
+  strengthTrendOptionRight: {
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+  },
+  strengthTrendOptionWeight: {
+    fontSize: font.sm,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  strengthTrendModalEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xxxl,
+  },
+  strengthTrendModalEmptyText: {
     fontSize: font.md,
     color: colors.text.secondary,
     textAlign: 'center',

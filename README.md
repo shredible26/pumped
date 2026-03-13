@@ -123,9 +123,11 @@ utils/          theme, date, schedule, workoutName, units, epley, recoveryModel
 - Workouts, sets, profile, fatigue, streaks, and AI plans are stored in Supabase keyed by user. Sign out clears local state; signing back in loads that user’s data. Active workout draft is cleared on sign out.
 
 ### TODO
-- When a user is logging a time-based exercise like running, walking, etc (something that does not include repetions), make sure to only have an optional 'minutes and seconds' log, not sets/reps. You should not be able to add multiple sets as well. 
-- In the generate WOrkout button (after clicking 'Regenerate'), remove the top generate button.
-- In the 'progress' tab, design a new element called 'Strength trends'. Let the user choose an exercise and for the chosen exercise, a graph should be generated showing the logged weights for that exercise over time, clearly showing trends/changes. Underneath display the recorded map for that workout (if exists from all recorded workouts) and display it (also showing where the data is from / which workout). Show the 'actual max' based on the users data and calculate an estimated 1 rep max (if data is available) for that user for the selected exercise. Make sure this works for every single weight lifting workout. Users should only be able to see this for exercises that involve weight (so no cardio, bodyweight, etc).
+- Make strength trends blank everytime a user clicks the progress page. it should say 'Choose Exercise' or something and the graph should only generate after they select an exercise. 
+- Progress page should not reload every time I click on to it. Data should stay the same and should automatically be updated whenever any stats change (from a workout log). 
+- Add a 'Regenerate' button under the Suggestions element in the Progress tab
+- Allow duplicate workout titles to be saved. Currently, when I log a workout sometimes there is a duplicate title, and if I already have that duplicate title name saved then the button shows 'Already Saved' or something like that. I should be able to save different workouts with identical titles.  
+- In the generate WOrkout button (after clicking 'Regenerate'), remove the top generate button. 
 - When I click Generate Workout, sometimes after clicking the button it glitches and takes me back to the homescreen. When I do it the second time it always works then. Please figure out how to fix this. 
 - Make speed logging faster (maybe remove 'Save Workout screen and add save button to workout summary screen instead)
 - Many times when I do somehting (like log a workout or generate a workout) and I go home, the animation makes it look like there is a new duplicate screen made. I am able to swipe to the right and go back to the duplicated screen. All the data on the screen is accurate and functional, but it makes the UI seem unprofessional. 

@@ -1,0 +1,299 @@
+import { supabase } from './supabase';
+import { e1rm } from '@/utils/epley';
+
+interface CompletedSession {
+  id: string;
+  name: string;
+  date: string;
+  completed_at: string | null;
+}
+
+interface ExerciseMeta {
+  id: string;
+  name: string;
+  equipment: string;
+  movement_pattern: string;
+}
+
+export interface StrengthTrendExerciseOption {
+  exerciseId: string;
+  exerciseName: string;
+  sessionCount: number;
+  lastLoggedDate: string | null;
+  lastWorkoutName: string | null;
+  latestWeight: number | null;
+}
+
+export interface StrengthTrendPoint {
+  sessionId: string;
+  sessionName: string;
+  sessionDate: string;
+  completedAt: string;
+  maxWeight: number;
+  reps: number | null;
+  estimatedOneRepMax: number | null;
+  setCount: number;
+}
+
+export interface StrengthTrendBestMark {
+  value: number;
+  weight: number;
+  reps: number | null;
+  sessionId: string;
+  sessionName: string;
+  sessionDate: string;
+}
+
+export interface StrengthTrendData {
+  exerciseId: string;
+  exerciseName: string;
+  points: StrengthTrendPoint[];
+  actualMax: StrengthTrendBestMark | null;
+  estimatedOneRepMax: StrengthTrendBestMark | null;
+}
+
+function isEligibleWeightedExercise(exercise: ExerciseMeta | undefined): boolean {
+  if (!exercise) return false;
+  if (exercise.equipment === 'bodyweight' || exercise.equipment === 'cardio_machine') return false;
+  if (exercise.movement_pattern === 'cardio') return false;
+  return true;
+}
+
+async function getCompletedSessions(userId: string): Promise<CompletedSession[]> {
+  const { data, error } = await supabase
+    .from('workout_sessions')
+    .select('id, name, date, completed_at')
+    .eq('user_id', userId)
+    .eq('completed', true)
+    .or('is_rest_day.is.null,is_rest_day.eq.false')
+    .order('completed_at', { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as CompletedSession[];
+}
+
+async function getExerciseMeta(exerciseIds: string[]): Promise<Map<string, ExerciseMeta>> {
+  if (exerciseIds.length === 0) return new Map();
+
+  const { data, error } = await supabase
+    .from('exercises')
+    .select('id, name, equipment, movement_pattern')
+    .in('id', exerciseIds);
+
+  if (error) throw error;
+  return new Map(((data ?? []) as ExerciseMeta[]).map((exercise) => [exercise.id, exercise]));
+}
+
+export async function getStrengthTrendExerciseOptions(
+  userId: string,
+): Promise<StrengthTrendExerciseOption[]> {
+  const sessions = await getCompletedSessions(userId);
+  if (sessions.length === 0) return [];
+
+  const sessionIds = sessions.map((session) => session.id);
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+
+  const { data: setLogs, error: setError } = await supabase
+    .from('set_logs')
+    .select('session_id, exercise_id, actual_weight')
+    .in('session_id', sessionIds)
+    .gt('actual_weight', 0);
+
+  if (setError) throw setError;
+
+  const exerciseIds = [
+    ...new Set((setLogs ?? []).map((set: any) => set.exercise_id).filter(Boolean)),
+  ];
+  const exerciseMap = await getExerciseMeta(exerciseIds);
+
+  const byExercise = new Map<
+    string,
+    {
+      exerciseName: string;
+      sessionIds: Set<string>;
+      lastLoggedDate: string | null;
+      lastWorkoutName: string | null;
+      latestWeight: number | null;
+    }
+  >();
+
+  for (const rawSet of setLogs ?? []) {
+    const set = rawSet as { session_id: string; exercise_id: string; actual_weight: number | null };
+    const exercise = exerciseMap.get(set.exercise_id);
+    const session = sessionById.get(set.session_id);
+
+    if (!exercise || !session || !isEligibleWeightedExercise(exercise)) continue;
+
+    const weight = Number(set.actual_weight) || 0;
+    if (weight <= 0) continue;
+
+    const entry = byExercise.get(set.exercise_id) ?? {
+      exerciseName: exercise.name,
+      sessionIds: new Set<string>(),
+      lastLoggedDate: null,
+      lastWorkoutName: null,
+      latestWeight: null,
+    };
+
+    entry.sessionIds.add(session.id);
+
+    if (!entry.lastLoggedDate || session.date > entry.lastLoggedDate) {
+      entry.lastLoggedDate = session.date;
+      entry.lastWorkoutName = session.name;
+      entry.latestWeight = weight;
+    } else if (session.date === entry.lastLoggedDate) {
+      entry.latestWeight = Math.max(entry.latestWeight ?? 0, weight);
+    }
+
+    byExercise.set(set.exercise_id, entry);
+  }
+
+  return Array.from(byExercise.entries())
+    .map(([exerciseId, entry]) => ({
+      exerciseId,
+      exerciseName: entry.exerciseName,
+      sessionCount: entry.sessionIds.size,
+      lastLoggedDate: entry.lastLoggedDate,
+      lastWorkoutName: entry.lastWorkoutName,
+      latestWeight: entry.latestWeight,
+    }))
+    .sort((a, b) => {
+      const dateCompare = (b.lastLoggedDate ?? '').localeCompare(a.lastLoggedDate ?? '');
+      if (dateCompare !== 0) return dateCompare;
+      return a.exerciseName.localeCompare(b.exerciseName);
+    });
+}
+
+export async function getStrengthTrendData(
+  userId: string,
+  exerciseId: string,
+): Promise<StrengthTrendData | null> {
+  const sessions = await getCompletedSessions(userId);
+  if (sessions.length === 0) return null;
+
+  const exerciseMap = await getExerciseMeta([exerciseId]);
+  const exercise = exerciseMap.get(exerciseId);
+  if (!exercise || !isEligibleWeightedExercise(exercise)) {
+    return {
+      exerciseId,
+      exerciseName: exercise?.name ?? 'Exercise',
+      points: [],
+      actualMax: null,
+      estimatedOneRepMax: null,
+    };
+  }
+
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const sessionIds = sessions.map((session) => session.id);
+
+  const { data: setLogs, error: setError } = await supabase
+    .from('set_logs')
+    .select('session_id, actual_weight, actual_reps')
+    .eq('exercise_id', exerciseId)
+    .in('session_id', sessionIds)
+    .gt('actual_weight', 0)
+    .order('set_number', { ascending: true });
+
+  if (setError) throw setError;
+
+  const setsBySession = new Map<
+    string,
+    Array<{ weight: number; reps: number | null }>
+  >();
+
+  for (const rawSet of setLogs ?? []) {
+    const set = rawSet as {
+      session_id: string;
+      actual_weight: number | null;
+      actual_reps: number | null;
+    };
+    const weight = Number(set.actual_weight) || 0;
+    if (weight <= 0) continue;
+
+    const sessionSets = setsBySession.get(set.session_id) ?? [];
+    sessionSets.push({
+      weight,
+      reps: set.actual_reps == null ? null : Number(set.actual_reps) || null,
+    });
+    setsBySession.set(set.session_id, sessionSets);
+  }
+
+  const points: StrengthTrendPoint[] = [];
+  let actualMax: StrengthTrendBestMark | null = null;
+  let estimatedOneRepMax: StrengthTrendBestMark | null = null;
+
+  for (const [sessionId, sets] of setsBySession.entries()) {
+    const session = sessionById.get(sessionId);
+    if (!session || sets.length === 0) continue;
+
+    let sessionTopWeight = 0;
+    let sessionTopReps: number | null = null;
+    let sessionBestE1rm: number | null = null;
+
+    for (const set of sets) {
+      if (
+        set.weight > sessionTopWeight ||
+        (set.weight === sessionTopWeight && (set.reps ?? 0) > (sessionTopReps ?? 0))
+      ) {
+        sessionTopWeight = set.weight;
+        sessionTopReps = set.reps;
+      }
+
+      if (
+        actualMax == null ||
+        set.weight > actualMax.value ||
+        (set.weight === actualMax.value && (set.reps ?? 0) > (actualMax.reps ?? 0))
+      ) {
+        actualMax = {
+          value: set.weight,
+          weight: set.weight,
+          reps: set.reps,
+          sessionId,
+          sessionName: session.name,
+          sessionDate: session.date,
+        };
+      }
+
+      if (set.reps && set.reps > 0) {
+        const estimate = e1rm(set.weight, set.reps);
+        sessionBestE1rm = Math.max(sessionBestE1rm ?? 0, estimate);
+
+        if (
+          estimatedOneRepMax == null ||
+          estimate > estimatedOneRepMax.value ||
+          (estimate === estimatedOneRepMax.value && set.weight > estimatedOneRepMax.weight)
+        ) {
+          estimatedOneRepMax = {
+            value: estimate,
+            weight: set.weight,
+            reps: set.reps,
+            sessionId,
+            sessionName: session.name,
+            sessionDate: session.date,
+          };
+        }
+      }
+    }
+
+    points.push({
+      sessionId,
+      sessionName: session.name,
+      sessionDate: session.date,
+      completedAt: session.completed_at ?? `${session.date}T12:00:00`,
+      maxWeight: sessionTopWeight,
+      reps: sessionTopReps,
+      estimatedOneRepMax: sessionBestE1rm,
+      setCount: sets.length,
+    });
+  }
+
+  points.sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+
+  return {
+    exerciseId,
+    exerciseName: exercise.name,
+    points,
+    actualMax,
+    estimatedOneRepMax,
+  };
+}
