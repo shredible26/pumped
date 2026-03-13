@@ -340,61 +340,9 @@ export default function TodayScreen() {
           </View>
         )}
 
-        {/* Today + workout(s) already logged: show list of sessions with View Workout buttons, no AI card */}
-        {isSelectedToday && !isRestDay && sessionsForSelectedDate.length > 0 && (
-          <View style={styles.pastSessionsContainer}>
-            <View style={styles.restButtonColumn}>
-              <Pressable
-                style={[styles.restDayButton, styles.restDayButtonFirst]}
-                onPress={() => router.push('/workout/modifications')}
-              >
-                <Ionicons name="sparkles" size={18} color={colors.text.primary} />
-                <Text style={styles.restDayButtonText}>Generate Workout</Text>
-              </Pressable>
-              <Pressable
-                style={styles.restDayButton}
-                onPress={() =>
-                  router.push({
-                    pathname: '/speedlog',
-                    params: { logForDate: format(selectedDate, 'yyyy-MM-dd') },
-                  })
-                }
-              >
-                <Ionicons name="flash" size={18} color={colors.text.primary} />
-                <Text style={styles.restDayButtonText}>Speed Log</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
-            {sessionsForSelectedDate.map((sess) => (
-              <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
-                <View style={styles.workoutCardHeader}>
-                  <View style={styles.workoutIconBox}>
-                    <Ionicons name="barbell" size={18} color={colors.accent.primary} />
-                  </View>
-                </View>
-                <Text style={styles.workoutType} numberOfLines={1} ellipsizeMode="tail">
-                  {sess.name}
-                </Text>
-                <Text style={styles.programName}>
-                  {format(selectedDate, 'MMM d, yyyy')}
-                  {sess.completed_at
-                    ? ` · ${format(new Date(sess.completed_at), 'h:mm a')}`
-                    : ''}
-                </Text>
-                <Pressable
-                  style={styles.startButton}
-                  onPress={() => router.push(`/history/${sess.id}`)}
-                >
-                  <Ionicons name="open-outline" size={18} color={colors.text.inverse} />
-                  <Text style={styles.startButtonText}>View Workout</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Today + no workouts logged yet: AI card + Speed Log */}
-        {isSelectedToday && !isRestDay && sessionsForSelectedDate.length === 0 && (
+        {/* Today (non-rest): always show AI card with View Workout / Generate + Speed Log, then logged workouts below */}
+        {isSelectedToday && !isRestDay && (
+          <>
           <View style={styles.workoutCard}>
             <View style={styles.workoutCardHeader}>
               <View style={styles.scheduledBadge}>
@@ -455,6 +403,38 @@ export default function TodayScreen() {
               <Text style={styles.speedLogButtonText}>Speed Log</Text>
             </Pressable>
           </View>
+
+          {sessionsForSelectedDate.length > 0 && (
+            <View style={[styles.pastSessionsContainer, { marginTop: spacing.lg }]}>
+              <Text style={styles.workoutsCompletedLabel}>Workouts Completed</Text>
+              {sessionsForSelectedDate.map((sess) => (
+                <View key={sess.id} style={[styles.workoutCard, styles.workoutCardInList]}>
+                  <View style={styles.workoutCardHeader}>
+                    <View style={styles.workoutIconBox}>
+                      <Ionicons name="barbell" size={18} color={colors.accent.primary} />
+                    </View>
+                  </View>
+                  <Text style={styles.workoutType} numberOfLines={1} ellipsizeMode="tail">
+                    {sess.name}
+                  </Text>
+                  <Text style={styles.programName}>
+                    {format(selectedDate, 'MMM d, yyyy')}
+                    {sess.completed_at
+                      ? ` · ${format(new Date(sess.completed_at), 'h:mm a')}`
+                      : ''}
+                  </Text>
+                  <Pressable
+                    style={styles.startButton}
+                    onPress={() => router.push(`/history/${sess.id}`)}
+                  >
+                    <Ionicons name="open-outline" size={18} color={colors.text.inverse} />
+                    <Text style={styles.startButtonText}>View Workout</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+        </>
         )}
 
         {isSelectedToday && isRestDay && (
