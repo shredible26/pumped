@@ -25,6 +25,7 @@ import { colors, font, spacing, radius } from '@/utils/theme';
 import { PROGRAM_STYLES } from '@/utils/constants';
 import { formatWeight, formatHeightInches, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
 import { getVolumeChartData } from '@/services/volume';
+import { fetchCompletedWorkoutCount } from '@/services/workouts';
 
 const PROGRAM_OPTIONS = PROGRAM_STYLES.map((p) => ({
   key: p.id,
@@ -243,13 +244,8 @@ export default function ProfileScreen() {
     }
 
     try {
-      const { data: sessions } = await supabase
-        .from('workout_sessions')
-        .select('id, is_rest_day')
-        .eq('user_id', session.user.id)
-        .eq('completed', true);
-      const workoutsOnly = (sessions ?? []).filter((s: any) => !s.is_rest_day);
-      setWorkoutCount(workoutsOnly.length);
+      const count = await fetchCompletedWorkoutCount(session.user.id);
+      setWorkoutCount(count);
     } catch {
       setWorkoutCount(0);
     }

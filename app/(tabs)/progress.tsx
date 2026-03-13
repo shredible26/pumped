@@ -10,6 +10,8 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +19,6 @@ import { format } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { formatWeight, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
-import { supabase } from '@/services/supabase';
 import { generateInsights, generateSuggestions, type Insight } from '@/services/insights';
 import { getBig3, type Big3Result } from '@/services/strength';
 import {
@@ -33,6 +34,7 @@ import {
   type StrengthTrendData,
   type StrengthTrendExerciseOption,
 } from '@/services/strengthTrends';
+import { fetchCompletedWorkoutCount } from '@/services/workouts';
 import { useFocusEffect } from 'expo-router';
 
 const MUSCLE_LABELS: Record<string, string> = {
@@ -62,7 +64,6 @@ export default function ProgressScreen() {
   const [big3, setBig3] = useState<Big3Result | null>(null);
   const [strengthTrendOptions, setStrengthTrendOptions] = useState<StrengthTrendExerciseOption[]>([]);
   const [selectedStrengthTrendExerciseId, setSelectedStrengthTrendExerciseId] = useState<string | null>(null);
-  const selectedStrengthTrendExerciseIdRef = useRef<string | null>(null);
   const [strengthTrendData, setStrengthTrendData] = useState<StrengthTrendData | null>(null);
   const [strengthTrendLoading, setStrengthTrendLoading] = useState(false);
   const [strengthTrendPickerOpen, setStrengthTrendPickerOpen] = useState(false);
@@ -77,6 +78,11 @@ export default function ProgressScreen() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
   const streak = profile?.current_streak_days ?? 0;
+  const selectedStrengthTrendExerciseIdRef = useRef<string | null>(null);
+  const fetchDataRef = useRef<
+    ((options?: { preserveStrengthSelection?: boolean }) => Promise<void>) | null
+  >(null);
+  const hasLoadedProgressRef = useRef(false);
 
   const loadStrengthTrendData = useCallback(async (userId: string, exerciseId: string | null) => {
     if (!exerciseId) {
@@ -97,18 +103,43 @@ export default function ProgressScreen() {
     }
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const resetStrengthTrendSelection = useCallback(() => {
+    selectedStrengthTrendExerciseIdRef.current = null;
+    setSelectedStrengthTrendExerciseId(null);
+    setStrengthTrendData(null);
+    setStrengthTrendPickerOpen(false);
+    setStrengthTrendSearchQuery('');
+  }, []);
+
+  const fetchData = useCallback(async (options?: { preserveStrengthSelection?: boolean }) => {
     if (!session?.user?.id) return;
     const userId = session.user.id;
+    const preserveStrengthSelection = options?.preserveStrengthSelection ?? true;
+
+    if (!preserveStrengthSelection) {
+      selectedStrengthTrendExerciseIdRef.current = null;
+      setSelectedStrengthTrendExerciseId(null);
+      setStrengthTrendData(null);
+    }
+
     setStrengthTrendLoading(true);
     try {
-      const [insightsRes, big3Res, distRes, volRes, suggestionsRes, strengthTrendOptionsRes] = await Promise.all([
+      const [
+        insightsRes,
+        big3Res,
+        distRes,
+        volRes,
+        suggestionsRes,
+        strengthTrendOptionsRes,
+        totalWorkoutsRes,
+      ] = await Promise.all([
         generateInsights(userId),
         getBig3(userId),
         calculateMuscleDistribution(userId, distributionPeriod),
         getVolumeChartData(userId, volumePeriod),
         generateSuggestions(userId),
         getStrengthTrendExerciseOptions(userId),
+        fetchCompletedWorkoutCount(userId),
       ]);
       setInsights(insightsRes);
       setBig3(big3Res);
@@ -116,26 +147,25 @@ export default function ProgressScreen() {
       setVolumeData(volRes);
       setSuggestions(suggestionsRes);
       setStrengthTrendOptions(strengthTrendOptionsRes);
+      setTotalWorkouts(totalWorkoutsRes);
 
       const resolvedStrengthTrendExerciseId =
+        preserveStrengthSelection &&
         selectedStrengthTrendExerciseIdRef.current &&
         strengthTrendOptionsRes.some(
           (option) => option.exerciseId === selectedStrengthTrendExerciseIdRef.current,
         )
           ? selectedStrengthTrendExerciseIdRef.current
-          : strengthTrendOptionsRes[0]?.exerciseId ?? null;
+          : null;
 
       selectedStrengthTrendExerciseIdRef.current = resolvedStrengthTrendExerciseId;
       setSelectedStrengthTrendExerciseId(resolvedStrengthTrendExerciseId);
-      await loadStrengthTrendData(userId, resolvedStrengthTrendExerciseId);
-
-      const { data: sessions } = await supabase
-        .from('workout_sessions')
-        .select('id, is_rest_day')
-        .eq('user_id', userId)
-        .eq('completed', true);
-      const workoutsOnly = (sessions ?? []).filter((s: any) => !s.is_rest_day);
-      setTotalWorkouts(workoutsOnly.length);
+      if (resolvedStrengthTrendExerciseId) {
+        await loadStrengthTrendData(userId, resolvedStrengthTrendExerciseId);
+      } else {
+        setStrengthTrendData(null);
+        setStrengthTrendLoading(false);
+      }
     } catch (e) {
       console.warn('Progress fetch error', e);
       setStrengthTrendLoading(false);
@@ -143,18 +173,29 @@ export default function ProgressScreen() {
   }, [session?.user?.id, distributionPeriod, volumePeriod, loadStrengthTrendData]);
 
   useEffect(() => {
-    fetchData();
+    fetchDataRef.current = fetchData;
   }, [fetchData]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchData();
-    }, [fetchData])
+      if (!session?.user?.id) {
+        return;
+      }
+
+      resetStrengthTrendSelection();
+      hasLoadedProgressRef.current = true;
+      void fetchDataRef.current?.({ preserveStrengthSelection: false });
+    }, [session?.user?.id, resetStrengthTrendSelection]),
   );
+
+  useEffect(() => {
+    if (!hasLoadedProgressRef.current || !session?.user?.id) return;
+    void fetchData({ preserveStrengthSelection: true });
+  }, [distributionPeriod, volumePeriod, session?.user?.id, fetchData]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchData();
+    await fetchData({ preserveStrengthSelection: true });
     setRefreshing(false);
   }, [fetchData]);
 
@@ -187,6 +228,11 @@ export default function ProgressScreen() {
     },
     [session?.user?.id, loadStrengthTrendData],
   );
+
+  const closeStrengthTrendPicker = useCallback(() => {
+    setStrengthTrendPickerOpen(false);
+    setStrengthTrendSearchQuery('');
+  }, []);
 
   const insightIconColor = (type: Insight['type']) => {
     if (type === 'positive') return colors.accent.primary;
@@ -350,45 +396,60 @@ export default function ProgressScreen() {
           </View>
         ) : strengthTrendOptions.length > 0 ? (
           <>
-            <Pressable
-              style={styles.strengthTrendSelector}
-              onPress={() => setStrengthTrendPickerOpen(true)}
-            >
-              <View style={styles.strengthTrendSelectorCopy}>
-                <Text style={styles.strengthTrendSelectorLabel}>Selected exercise</Text>
-                <Text style={styles.strengthTrendSelectorValue}>
-                  {selectedStrengthTrendExercise?.exerciseName ?? 'Choose an exercise'}
+            {selectedStrengthTrendExercise ? (
+              <Pressable
+                style={styles.strengthTrendSelector}
+                onPress={() => setStrengthTrendPickerOpen(true)}
+              >
+                <View style={styles.strengthTrendSelectorCopy}>
+                  <Text style={styles.strengthTrendSelectorLabel}>Selected exercise</Text>
+                  <Text style={styles.strengthTrendSelectorValue}>
+                    {selectedStrengthTrendExercise.exerciseName}
+                  </Text>
+                  <Text style={styles.strengthTrendSelectorMeta}>
+                    {`${selectedStrengthTrendExercise.sessionCount} workout${
+                      selectedStrengthTrendExercise.sessionCount === 1 ? '' : 's'
+                    } tracked${
+                      selectedStrengthTrendExercise.lastLoggedDate
+                        ? ` · Last logged ${format(
+                            new Date(`${selectedStrengthTrendExercise.lastLoggedDate}T12:00:00`),
+                            'MMM d',
+                          )}`
+                        : ''
+                    }`}
+                  </Text>
+                </View>
+                <View style={styles.strengthTrendSelectorIcon}>
+                  <Ionicons name="chevron-down" size={18} color={colors.text.primary} />
+                </View>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.strengthTrendPromptCard}
+                onPress={() => setStrengthTrendPickerOpen(true)}
+              >
+                <View style={styles.strengthTrendPromptIconWrap}>
+                  <Ionicons name="barbell-outline" size={26} color={colors.accent.primary} />
+                </View>
+                <Text style={styles.strengthTrendPromptTitle}>Choose an exercise</Text>
+                <Text style={styles.strengthTrendPromptText}>
+                  Pick a weighted exercise from your past workouts to generate a trend line,
+                  actual max, and estimated 1RM.
                 </Text>
-                <Text style={styles.strengthTrendSelectorMeta}>
-                  {selectedStrengthTrendExercise
-                    ? `${selectedStrengthTrendExercise.sessionCount} workout${
-                        selectedStrengthTrendExercise.sessionCount === 1 ? '' : 's'
-                      } tracked${
-                        selectedStrengthTrendExercise.lastLoggedDate
-                          ? ` · Last logged ${format(
-                              new Date(
-                                `${selectedStrengthTrendExercise.lastLoggedDate}T12:00:00`,
-                              ),
-                              'MMM d',
-                            )}`
-                          : ''
-                      }`
-                    : 'Only weighted exercises appear here'}
-                </Text>
-              </View>
-              <View style={styles.strengthTrendSelectorIcon}>
-                <Ionicons name="chevron-down" size={18} color={colors.text.primary} />
-              </View>
-            </Pressable>
+                <View style={styles.strengthTrendPromptButton}>
+                  <Text style={styles.strengthTrendPromptButtonText}>Choose Exercise</Text>
+                </View>
+              </Pressable>
+            )}
 
-            {strengthTrendLoading ? (
+            {selectedStrengthTrendExercise && strengthTrendLoading ? (
               <View style={styles.strengthTrendLoadingCard}>
                 <ActivityIndicator color={colors.accent.primary} />
                 <Text style={styles.strengthTrendLoadingText}>
                   Building your trend line...
                 </Text>
               </View>
-            ) : strengthTrendData && strengthTrendData.points.length > 0 ? (
+            ) : selectedStrengthTrendExercise && strengthTrendData && strengthTrendData.points.length > 0 ? (
               <>
                 <StrengthTrendChart
                   exerciseName={strengthTrendData.exerciseName}
@@ -450,7 +511,7 @@ export default function ProgressScreen() {
                   </View>
                 </View>
               </>
-            ) : (
+            ) : selectedStrengthTrendExercise ? (
               <View style={styles.strengthTrendEmptyCard}>
                 <Ionicons name="analytics-outline" size={34} color={colors.text.tertiary} />
                 <Text style={styles.strengthTrendEmptyTitle}>
@@ -461,7 +522,7 @@ export default function ProgressScreen() {
                   and estimated 1RM.
                 </Text>
               </View>
-            )}
+            ) : null}
           </>
         ) : (
           <View style={styles.strengthTrendEmptyCard}>
@@ -633,49 +694,33 @@ export default function ProgressScreen() {
 
       <Modal
         visible={strengthTrendPickerOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setStrengthTrendPickerOpen(false)}
+        animationType="slide"
+        onRequestClose={closeStrengthTrendPicker}
       >
-        <View style={styles.strengthTrendModalBackdrop}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setStrengthTrendPickerOpen(false)}
-          />
-          <View style={styles.strengthTrendModalCard}>
-            <View style={styles.strengthTrendModalHandle} />
-            <View style={styles.strengthTrendModalHeader}>
-              <View>
-                <Text style={styles.strengthTrendModalTitle}>Choose an exercise</Text>
-                <Text style={styles.strengthTrendModalSubtitle}>
-                  Only weighted exercises you&apos;ve logged appear here.
-                </Text>
-              </View>
-              <Pressable
-                style={styles.strengthTrendModalClose}
-                onPress={() => setStrengthTrendPickerOpen(false)}
-              >
-                <Ionicons name="close" size={18} color={colors.text.primary} />
-              </Pressable>
-            </View>
+        <SafeAreaView style={styles.strengthTrendPickerScreen}>
+          <View style={styles.strengthTrendPickerHeader}>
+            <View style={styles.strengthTrendPickerHeaderSpacer} />
+            <Text style={styles.strengthTrendPickerTitle}>Choose an exercise</Text>
+            <View style={styles.strengthTrendPickerHeaderSpacer} />
+          </View>
 
-            <View style={styles.strengthTrendSearchRow}>
-              <Ionicons name="search" size={16} color={colors.text.tertiary} />
-              <TextInput
-                style={styles.strengthTrendSearchInput}
-                value={strengthTrendSearchQuery}
-                onChangeText={setStrengthTrendSearchQuery}
-                placeholder="Search exercises"
-                placeholderTextColor={colors.text.tertiary}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+          <KeyboardAvoidingView
+            style={styles.strengthTrendPickerBody}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <View style={styles.strengthTrendPickerIntro}>
+              <Text style={styles.strengthTrendPickerIntroTitle}>Logged weighted exercises</Text>
+              <Text style={styles.strengthTrendPickerIntroText}>
+                Only barbell, dumbbell, cable, machine, and kettlebell lifts from your
+                completed workouts appear here.
+              </Text>
             </View>
 
             <ScrollView
-              style={styles.strengthTrendModalList}
+              style={styles.strengthTrendPickerList}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.strengthTrendPickerListContent}
             >
               {filteredStrengthTrendOptions.length > 0 ? (
                 filteredStrengthTrendOptions.map((option) => {
@@ -689,7 +734,7 @@ export default function ProgressScreen() {
                       ]}
                       onPress={() => handleSelectStrengthTrendExercise(option.exerciseId)}
                     >
-                      <View style={{ flex: 1 }}>
+                      <View style={styles.strengthTrendOptionCopy}>
                         <Text
                           style={[
                             styles.strengthTrendOptionName,
@@ -708,6 +753,11 @@ export default function ProgressScreen() {
                               )}`
                             : ''}
                         </Text>
+                        {option.lastWorkoutName ? (
+                          <Text style={styles.strengthTrendOptionWorkoutName}>
+                            {option.lastWorkoutName}
+                          </Text>
+                        ) : null}
                       </View>
                       <View style={styles.strengthTrendOptionRight}>
                         {option.latestWeight ? (
@@ -735,8 +785,36 @@ export default function ProgressScreen() {
                 </View>
               )}
             </ScrollView>
-          </View>
-        </View>
+
+            <View style={styles.strengthTrendPickerFooter}>
+              <Pressable
+                style={styles.strengthTrendPickerBackButton}
+                onPress={closeStrengthTrendPicker}
+              >
+                <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
+                <Text style={styles.strengthTrendPickerBackText}>Back</Text>
+              </Pressable>
+              <View style={styles.strengthTrendPickerSearchDock}>
+                <Ionicons name="search" size={18} color={colors.text.tertiary} />
+                <TextInput
+                  style={styles.strengthTrendPickerSearchInput}
+                  value={strengthTrendSearchQuery}
+                  onChangeText={setStrengthTrendSearchQuery}
+                  placeholder="Search exercises..."
+                  placeholderTextColor={colors.text.tertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {strengthTrendSearchQuery.length > 0 ? (
+                  <Pressable onPress={() => setStrengthTrendSearchQuery('')}>
+                    <Ionicons name="close-circle" size={18} color={colors.text.tertiary} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
@@ -955,6 +1033,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  strengthTrendPromptCard: {
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.xl,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  strengthTrendPromptIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.accent.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  strengthTrendPromptTitle: {
+    fontSize: font.xl,
+    fontWeight: '700',
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  strengthTrendPromptText: {
+    fontSize: font.md,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: spacing.sm,
+  },
+  strengthTrendPromptButton: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.accent.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+  },
+  strengthTrendPromptButtonText: {
+    fontSize: font.md,
+    fontWeight: '700',
+    color: colors.text.inverse,
+  },
   strengthTrendLoadingCard: {
     backgroundColor: colors.bg.card,
     borderRadius: radius.lg,
@@ -1031,75 +1152,55 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-  strengthTrendModalBackdrop: {
+  strengthTrendPickerScreen: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(6, 10, 16, 0.72)',
-  },
-  strengthTrendModalCard: {
     backgroundColor: colors.bg.primary,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xxxl,
-    minHeight: '72%',
-    borderTopWidth: 1,
-    borderColor: colors.border.default,
   },
-  strengthTrendModalHandle: {
-    alignSelf: 'center',
-    width: 52,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: colors.border.default,
-    marginBottom: spacing.lg,
-  },
-  strengthTrendModalHeader: {
+  strengthTrendPickerHeader: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
   },
-  strengthTrendModalTitle: {
-    fontSize: font.xxl,
+  strengthTrendPickerHeaderSpacer: {
+    width: 64,
+  },
+  strengthTrendPickerTitle: {
+    fontSize: font.xl,
     fontWeight: '700',
     color: colors.text.primary,
   },
-  strengthTrendModalSubtitle: {
-    fontSize: font.sm,
-    color: colors.text.secondary,
-    marginTop: spacing.xs,
-  },
-  strengthTrendModalClose: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.bg.card,
-    borderWidth: 1,
-    borderColor: colors.border.default,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  strengthTrendSearchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.bg.card,
-    borderWidth: 1,
-    borderColor: colors.border.default,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.lg,
-  },
-  strengthTrendSearchInput: {
+  strengthTrendPickerBody: {
     flex: 1,
-    paddingVertical: spacing.md,
+  },
+  strengthTrendPickerIntro: {
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.sm,
+  },
+  strengthTrendPickerIntroTitle: {
     fontSize: font.md,
+    fontWeight: '700',
     color: colors.text.primary,
   },
-  strengthTrendModalList: {
+  strengthTrendPickerIntroText: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  strengthTrendPickerList: {
+    flex: 1,
     marginTop: spacing.lg,
+  },
+  strengthTrendPickerListContent: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.lg,
   },
   strengthTrendOptionRow: {
     flexDirection: 'row',
@@ -1116,6 +1217,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent.bg,
     borderColor: colors.accent.primary,
   },
+  strengthTrendOptionCopy: {
+    flex: 1,
+  },
   strengthTrendOptionName: {
     fontSize: font.md,
     fontWeight: '700',
@@ -1128,6 +1232,11 @@ const styles = StyleSheet.create({
     fontSize: font.sm,
     color: colors.text.secondary,
     marginTop: 4,
+  },
+  strengthTrendOptionWorkoutName: {
+    fontSize: font.sm,
+    color: colors.text.tertiary,
+    marginTop: spacing.xs,
   },
   strengthTrendOptionRight: {
     alignItems: 'flex-end',
@@ -1148,6 +1257,52 @@ const styles = StyleSheet.create({
     fontSize: font.md,
     color: colors.text.secondary,
     textAlign: 'center',
+  },
+  strengthTrendPickerFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+    backgroundColor: colors.bg.primary,
+  },
+  strengthTrendPickerBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: 52,
+    borderRadius: radius.lg,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    paddingHorizontal: spacing.lg,
+  },
+  strengthTrendPickerBackText: {
+    fontSize: font.md,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  strengthTrendPickerSearchDock: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 52,
+    borderRadius: radius.lg,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    paddingHorizontal: spacing.lg,
+  },
+  strengthTrendPickerSearchInput: {
+    flex: 1,
+    fontSize: font.md,
+    color: colors.text.primary,
+    paddingVertical: spacing.md,
   },
 
   volumeToggle: {

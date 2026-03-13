@@ -43,6 +43,19 @@ export async function fetchSessions(
   return data as WorkoutSession[];
 }
 
+export async function fetchCompletedWorkoutCount(userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('workout_sessions')
+    .select('id, is_rest_day')
+    .eq('user_id', userId)
+    .eq('completed', true);
+
+  if (error) throw error;
+
+  return (data ?? []).filter((session: { is_rest_day?: boolean | null }) => !session.is_rest_day)
+    .length;
+}
+
 export async function fetchSessionById(sessionId: string): Promise<WorkoutSession | null> {
   const { data, error } = await supabase
     .from('workout_sessions')

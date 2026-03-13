@@ -31,6 +31,7 @@ import BodyMap from '@/components/home/BodyMap';
 import MuscleDetailSheet from '@/components/home/MuscleDetailSheet';
 import RoutineTimeline from '@/components/home/RoutineTimeline';
 import type { GeneratedWorkout } from '@/services/ai';
+import { fetchCompletedWorkoutCount } from '@/services/workouts';
 import { getWorkoutTypeForDate, getDisplayWorkoutType } from '@/utils/schedule';
 
 const PROGRAM_LABELS: Record<string, string> = {
@@ -67,6 +68,7 @@ export default function TodayScreen() {
   const [cachedPlan, setCachedPlan] = useState<GeneratedWorkout | null>(null);
   const [sessionsForSelectedDate, setSessionsForSelectedDate] = useState<SessionForDate[]>([]);
   const [historicalFatigueMap, setHistoricalFatigueMap] = useState<Array<{ muscle_group: string; recovery_pct: number | null; last_trained_at: string | null }>>([]);
+  const [totalWorkouts, setTotalWorkouts] = useState(0);
 
   const fetchProfile = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -149,19 +151,26 @@ export default function TodayScreen() {
   );
 
   const loadData = useCallback(async () => {
+    const userId = session?.user?.id;
+
     await Promise.all([
       fetchProfile(),
       refreshFatigue(),
       fetchWeekWorkouts(),
       fetchCachedPlan(),
+      userId
+        ? fetchCompletedWorkoutCount(userId)
+            .then(setTotalWorkouts)
+            .catch(() => setTotalWorkouts(0))
+        : Promise.resolve(setTotalWorkouts(0)),
     ]);
-    if (session?.user?.id) {
+    if (userId) {
       try {
-        const streakResult = await updateProfileStreak(session.user.id);
+        const streakResult = await updateProfileStreak(userId);
         const { data: profileData } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', session.user.id)
+          .eq('id', userId)
           .single();
         if (profileData) setProfile({ ...profileData, ...streakResult } as Profile);
       } catch {}
@@ -223,7 +232,6 @@ export default function TodayScreen() {
   }, []);
 
   const streak = profile?.current_streak_days ?? 0;
-  const totalWorkouts = profile?.total_workouts ?? 0;
   const trainingFreq = profile?.training_frequency ?? 4;
   const firstName = profile?.display_name?.split(' ')[0] ?? 'there';
   const todayType = getTodayWorkoutType(profile?.program_style, trainingFreq);
