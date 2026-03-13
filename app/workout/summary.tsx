@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,12 @@ import {
   Pressable,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useWorkoutStore } from '@/stores/workoutStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -32,6 +34,39 @@ interface SummaryData {
   newStrengthScore: number | null;
   prevStrengthScore: number | null;
   streak: number;
+}
+
+interface SavedWorkoutPayload {
+  name: string;
+  workoutType: string | null;
+  exercises: { name: string; sets: number }[];
+}
+
+function buildSavedWorkoutExercises(
+  setLogs: Array<{ exercise_name?: string | null; exercise_order?: number | null; set_number?: number | null }> | null | undefined,
+  fallbackName: string,
+  fallbackSetCount = 1
+): SavedWorkoutPayload['exercises'] {
+  if (!setLogs || setLogs.length === 0) {
+    return [{ name: fallbackName, sets: Math.max(1, fallbackSetCount) }];
+  }
+
+  const grouped = new Map<number, { name: string; sets: number }>();
+
+  for (const log of setLogs) {
+    const order = Number(log.exercise_order ?? 0);
+    const existing = grouped.get(order) ?? {
+      name: log.exercise_name ?? fallbackName,
+      sets: 0,
+    };
+
+    existing.sets = Math.max(existing.sets, Number(log.set_number ?? 1));
+    grouped.set(order, existing);
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, value]) => value);
 }
 
 export default function WorkoutSummaryScreen() {
@@ -58,6 +93,33 @@ export default function WorkoutSummaryScreen() {
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [saving, setSaving] = useState(true);
   const [displayName, setDisplayName] = useState(workoutName);
+  const [savePayload, setSavePayload] = useState<SavedWorkoutPayload | null>(null);
+  const [saveState, setSaveState] = useState<'checking' | 'idle' | 'saving' | 'saved'>('checking');
+  const processedSessionRef = useRef<string | null>(null);
+
+  const hydrateSaveState = useCallback(async (payload: SavedWorkoutPayload | null) => {
+    setSavePayload(payload);
+
+    if (!payload || !session?.user?.id) {
+      setSaveState('idle');
+      return;
+    }
+
+    setSaveState('checking');
+    try {
+      const { data, error } = await supabase
+        .from('saved_workouts')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .eq('name', payload.name)
+        .limit(1);
+
+      if (error) throw error;
+      setSaveState(data && data.length > 0 ? 'saved' : 'idle');
+    } catch {
+      setSaveState('idle');
+    }
+  }, [session?.user?.id]);
 
   const loadSummaryFromSession = useCallback(async (sid: string) => {
     if (!session?.user?.id) {
@@ -75,6 +137,27 @@ export default function WorkoutSummaryScreen() {
         .select('*')
         .eq('id', session.user.id)
         .single();
+      const { data: setLogs } = await supabase
+        .from('set_logs')
+        .select('exercise_name, exercise_order, set_number')
+        .eq('session_id', sid)
+        .order('exercise_order')
+        .order('set_number');
+
+      if (sessionData && !sessionData.is_cardio && Number(sessionData.set_count ?? 0) > 0) {
+        try {
+          await recordWorkoutStrain(
+            session.user.id,
+            sid,
+            sessionData.completed_at
+              ? new Date(sessionData.completed_at)
+              : new Date(`${sessionData.date}T12:00:00`),
+          );
+        } catch (strainError) {
+          console.warn('Load summary strain sync error:', strainError);
+        }
+      }
+
       if (sessionData) setDisplayName(sessionData.name);
       if (profileData) setProfile(profileData as any);
 
@@ -99,12 +182,26 @@ export default function WorkoutSummaryScreen() {
         prevStrengthScore: null,
         streak,
       });
+
+      await hydrateSaveState(
+        sessionData
+          ? {
+              name: sessionData.name,
+              workoutType: sessionData.workout_type ?? null,
+              exercises: buildSavedWorkoutExercises(
+                setLogs as any[] | null | undefined,
+                sessionData.name,
+                sessionData.set_count ?? 1
+              ),
+            }
+          : null
+      );
     } catch (err) {
       console.warn('Load summary error:', err);
     } finally {
       setSaving(false);
     }
-  }, [session?.user?.id, setProfile]);
+  }, [session?.user?.id, setProfile, hydrateSaveState]);
 
   const finalizeWorkout = useCallback(async () => {
     if (!session?.user?.id || !sessionId) {
@@ -281,6 +378,11 @@ export default function WorkoutSummaryScreen() {
       };
 
       setSummary(summaryData);
+      await hydrateSaveState({
+        name: workoutName || 'Workout',
+        workoutType: null,
+        exercises: exercises.map((ex) => ({ name: ex.name, sets: ex.sets })),
+      });
 
       if (prs.length > 0) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -290,20 +392,50 @@ export default function WorkoutSummaryScreen() {
     } finally {
       setSaving(false);
     }
-  }, [sessionId, exercises, completedSets, startedAt, session?.user?.id, profile]);
+  }, [sessionId, exercises, completedSets, startedAt, session?.user?.id, profile, workoutName, hydrateSaveState]);
 
   useEffect(() => {
-    if (fromLogFlow && urlSessionId) {
-      loadSummaryFromSession(urlSessionId);
-    } else {
-      finalizeWorkout();
+    if (!sessionId) {
+      setSaving(false);
+      return;
     }
-  }, [fromLogFlow, urlSessionId, loadSummaryFromSession, finalizeWorkout]);
+
+    if (processedSessionRef.current === sessionId) return;
+    processedSessionRef.current = sessionId;
+
+    if (fromLogFlow && urlSessionId) {
+      void loadSummaryFromSession(urlSessionId);
+    } else {
+      void finalizeWorkout();
+    }
+  }, [sessionId, fromLogFlow, urlSessionId, loadSummaryFromSession, finalizeWorkout]);
 
   const handleGoHome = () => {
     reset();
     router.replace('/(tabs)');
   };
+
+  const handleSaveWorkout = useCallback(async () => {
+    if (!session?.user?.id || !savePayload || saveState === 'saved' || saveState === 'saving') return;
+
+    setSaveState('saving');
+    try {
+      const { error } = await supabase.from('saved_workouts').insert({
+        user_id: session.user.id,
+        name: savePayload.name,
+        workout_type: savePayload.workoutType as any,
+        exercises: savePayload.exercises,
+        last_used_at: new Date().toISOString(),
+        use_count: 1,
+      });
+
+      if (error) throw error;
+      setSaveState('saved');
+    } catch (err: any) {
+      setSaveState('idle');
+      Alert.alert('Error', err?.message ?? 'Failed to save workout');
+    }
+  }, [session?.user?.id, savePayload, saveState]);
 
   if (saving) {
     return (
@@ -393,6 +525,36 @@ export default function WorkoutSummaryScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {savePayload ? (
+          <Pressable
+            style={[
+              styles.saveWorkoutButton,
+              saveState === 'saved' && styles.saveWorkoutButtonSaved,
+            ]}
+            onPress={handleSaveWorkout}
+            disabled={saveState === 'saving' || saveState === 'saved' || saveState === 'checking'}
+          >
+            {saveState === 'saving' || saveState === 'checking' ? (
+              <ActivityIndicator color={colors.text.primary} />
+            ) : (
+              <>
+                <Ionicons
+                  name={saveState === 'saved' ? 'checkmark-circle' : 'bookmark-outline'}
+                  size={18}
+                  color={saveState === 'saved' ? colors.text.inverse : colors.text.primary}
+                />
+                <Text
+                  style={[
+                    styles.saveWorkoutButtonText,
+                    saveState === 'saved' && styles.saveWorkoutButtonTextSaved,
+                  ]}
+                >
+                  {saveState === 'saved' ? 'Saved to Workouts' : 'Save Workout'}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        ) : null}
         <Pressable style={styles.homeButton} onPress={handleGoHome}>
           <Text style={styles.homeButtonText}>Back to Home</Text>
         </Pressable>
@@ -553,6 +715,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxxl,
     paddingTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  saveWorkoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+  },
+  saveWorkoutButtonSaved: {
+    backgroundColor: colors.accent.primary,
+    borderColor: colors.accent.primary,
+  },
+  saveWorkoutButtonText: {
+    color: colors.text.primary,
+    fontSize: font.lg,
+    fontWeight: '700',
+  },
+  saveWorkoutButtonTextSaved: {
+    color: colors.text.inverse,
   },
   homeButton: {
     backgroundColor: colors.accent.primary,

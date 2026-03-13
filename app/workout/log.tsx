@@ -106,8 +106,6 @@ export default function WorkoutLogScreen() {
   const [workoutName, setWorkoutName] = useState('');
   const [durationMinutes, setDurationMinutes] = useState(45);
   const [saving, setSaving] = useState(false);
-  const [saveModalVisible, setSaveModalVisible] = useState(false);
-  const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
   const [allExercises, setAllExercises] = useState<Exercise[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -214,6 +212,7 @@ export default function WorkoutLogScreen() {
       },
     ]);
     setSearchOpen(false);
+    setSearchQuery('');
   };
 
   const totalSets = exercises.reduce((s, e) => s + e.sets.length, 0);
@@ -331,8 +330,7 @@ export default function WorkoutLogScreen() {
         .eq('user_id', session.user.id)
         .eq('plan_date', today);
 
-      setCompletedSessionId(ws.id);
-      setSaveModalVisible(true);
+      router.replace(`/workout/summary?sessionId=${ws.id}`);
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Failed to save workout');
     } finally {
@@ -348,29 +346,8 @@ export default function WorkoutLogScreen() {
     profile,
     setProfile,
     workoutName,
+    router,
   ]);
-
-  const handleSaveWorkout = async () => {
-    if (!session?.user?.id || !completedSessionId) return;
-    try {
-      await supabase.from('saved_workouts').insert({
-        user_id: session.user.id,
-        name: workoutName.trim() || plan?.name || 'My Workout',
-        workout_type: (plan?.type ?? null) as any,
-        exercises: exercises.map((e) => ({ name: e.name, sets: e.sets.length })),
-        last_used_at: new Date().toISOString(),
-        use_count: 1,
-      });
-    } catch {}
-    setSaveModalVisible(false);
-    router.replace(`/workout/summary?sessionId=${completedSessionId}`);
-  };
-
-  const handleSkipSave = () => {
-    setSaveModalVisible(false);
-    if (completedSessionId)
-      router.replace(`/workout/summary?sessionId=${completedSessionId}`);
-  };
 
   if (loading || !plan) {
     return (
@@ -427,12 +404,11 @@ export default function WorkoutLogScreen() {
               </Pressable>
             </View>
             {isDurationExercise(ex) ? (
-              <View style={styles.durationEntryCard}>
-                <View style={styles.durationEntryHeader}>
-                  <View style={styles.durationEntryBadge}>
-                    <Text style={styles.durationEntryBadgeText}>Duration</Text>
+            <View style={styles.durationEntryCard}>
+              <View style={styles.durationEntryHeader}>
+                <View style={styles.durationEntryBadge}>
+                    <Text style={styles.durationEntryBadgeText}>Duration (optional)</Text>
                   </View>
-                  <Text style={styles.durationEntryHint}>Single entry</Text>
                 </View>
 
                 {showWeightInput(ex) ? (
@@ -469,9 +445,6 @@ export default function WorkoutLogScreen() {
                     updateSet(exIdx, 0, ex.sets[0]?.weight ?? '0', '0', ex.sets[0]?.durationMinutes, value)
                   }
                 />
-                <Text style={styles.durationEntryHelper}>
-                  Leave either box blank if you only want to log part of the time.
-                </Text>
               </View>
             ) : (
               <View style={styles.setPillRow}>
@@ -527,7 +500,7 @@ export default function WorkoutLogScreen() {
           {saving ? (
             <ActivityIndicator color={colors.text.inverse} />
           ) : (
-            <Text style={styles.completeButtonText}>Complete Workout</Text>
+            <Text style={styles.completeButtonText}>Log It</Text>
           )}
         </Pressable>
       </View>
@@ -613,17 +586,10 @@ export default function WorkoutLogScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={0}
           >
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search exercises..."
-              placeholderTextColor={colors.text.tertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
             <ScrollView
               style={{ flex: 1 }}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: 100 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
             >
               {allExercises
                 .filter(
@@ -643,52 +609,38 @@ export default function WorkoutLogScreen() {
                   </Pressable>
                 ))}
             </ScrollView>
-            <View style={styles.searchBackFooter}>
+            <View style={styles.searchFooter}>
               <Pressable
                 style={styles.searchBackBtn}
-                onPress={() => setSearchOpen(false)}
+                onPress={() => {
+                  setSearchOpen(false);
+                  setSearchQuery('');
+                }}
               >
                 <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
                 <Text style={styles.searchBackText}>Back</Text>
               </Pressable>
+              <View style={styles.searchDock}>
+                <Ionicons name="search" size={18} color={colors.text.tertiary} />
+                <TextInput
+                  style={styles.searchDockInput}
+                  placeholder="Search exercises..."
+                  placeholderTextColor={colors.text.tertiary}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  returnKeyType="search"
+                />
+                {searchQuery.length > 0 ? (
+                  <Pressable onPress={() => setSearchQuery('')}>
+                    <Ionicons name="close-circle" size={18} color={colors.text.tertiary} />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
-      {/* Save workout modal */}
-      <Modal
-        visible={saveModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={handleSkipSave}
-      >
-        <Pressable style={styles.saveOverlay} onPress={handleSkipSave}>
-          <View style={styles.saveSheet}>
-            <View style={styles.saveIconCircle}>
-              <Ionicons name="bookmark" size={28} color={colors.accent.primary} />
-            </View>
-            <Text style={styles.saveTitle}>Save This Workout?</Text>
-            <Text style={styles.saveSubtitle}>Reuse it next time</Text>
-            <Text style={styles.saveWorkoutNameDisplay}>
-              {workoutName.trim() || plan?.name || 'My Workout'}
-            </Text>
-            {exercises.slice(0, 5).map((e, i) => (
-              <View key={i} style={styles.saveExRow}>
-                <Ionicons name="checkmark-circle" size={18} color={colors.accent.primary} />
-                <Text style={styles.saveExName}>{e.name}</Text>
-                <Text style={styles.saveExSets}>{e.sets.length} sets</Text>
-              </View>
-            ))}
-            <Pressable style={styles.saveButton} onPress={handleSaveWorkout}>
-              <Text style={styles.saveButtonText}>Save Workout</Text>
-            </Pressable>
-            <Pressable style={styles.skipButton} onPress={handleSkipSave}>
-              <Text style={styles.skipText}>Skip</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -964,36 +916,48 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: '600',
   },
-  searchBackFooter: {
+  searchFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: 24,
     backgroundColor: colors.bg.primary,
     borderTopWidth: 1,
     borderTopColor: colors.border.default,
+  },
+  searchDock: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    minHeight: 52,
+  },
+  searchDockInput: {
+    flex: 1,
+    fontSize: font.md,
+    color: colors.text.primary,
+    paddingVertical: spacing.md,
   },
   searchBackBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
-    minWidth: 120,
-  },
-  searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
-  searchInput: {
+    minHeight: 52,
+    borderRadius: radius.lg,
     backgroundColor: colors.bg.card,
-    borderRadius: radius.md,
-    padding: spacing.lg,
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.md,
-    fontSize: font.md,
-    color: colors.text.primary,
     borderWidth: 1,
     borderColor: colors.border.default,
+    paddingHorizontal: spacing.lg,
   },
+  searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
   searchItem: {
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,

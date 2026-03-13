@@ -307,16 +307,7 @@ export default function SpeedLogEditorScreen() {
 
       clearActiveWorkout();
 
-      router.push({
-        pathname: '/speedlog/save',
-        params: {
-          sessionId: ws.id,
-          type: type ?? 'Custom',
-          workoutName: workoutName.trim() || `My ${type ?? 'Custom'} Day`,
-          exerciseNames: exercises.map((e) => e.exercise.name).join('|'),
-          exerciseSets: exercises.map((e) => e.sets.length).join('|'),
-        },
-      });
+      router.replace(`/workout/summary?sessionId=${ws.id}`);
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Failed to save workout');
     } finally {
@@ -382,9 +373,8 @@ export default function SpeedLogEditorScreen() {
               <View style={styles.durationEntryCard}>
                 <View style={styles.durationEntryHeader}>
                   <View style={styles.durationEntryBadge}>
-                    <Text style={styles.durationEntryBadgeText}>Duration</Text>
+                    <Text style={styles.durationEntryBadgeText}>Duration (optional)</Text>
                   </View>
-                  <Text style={styles.durationEntryHint}>Single entry</Text>
                 </View>
 
                 {showWeightInput(ex.exercise) ? (
@@ -447,9 +437,6 @@ export default function SpeedLogEditorScreen() {
                     )
                   }
                 />
-                <Text style={styles.durationEntryHelper}>
-                  Leave either box blank if you only want to log part of the time.
-                </Text>
               </View>
             ) : (
               <View style={styles.setPillRow}>
@@ -579,13 +566,6 @@ export default function SpeedLogEditorScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={0}
           >
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search exercises..."
-              placeholderTextColor={colors.text.tertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
             {loadingDb ? (
               <ActivityIndicator color={colors.accent.primary} style={{ marginTop: 40 }} />
             ) : (
@@ -593,7 +573,7 @@ export default function SpeedLogEditorScreen() {
                 style={{ flex: 1 }}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingBottom: 100 }}
+                contentContainerStyle={{ paddingBottom: 24 }}
               >
                 {groupedExercises.map(([muscle, exList]) => (
                   <View key={muscle}>
@@ -628,7 +608,7 @@ export default function SpeedLogEditorScreen() {
                 <View style={{ height: 24 }} />
               </ScrollView>
             )}
-            <View style={styles.searchBackFooter}>
+            <View style={styles.searchFooter}>
               <Pressable
                 style={styles.searchBackButton}
                 onPress={() => { setSearchOpen(false); setSearchQuery(''); }}
@@ -636,6 +616,22 @@ export default function SpeedLogEditorScreen() {
                 <Ionicons name="chevron-back" size={20} color={colors.text.primary} />
                 <Text style={styles.searchBackButtonText}>Back</Text>
               </Pressable>
+              <View style={styles.searchDock}>
+                <Ionicons name="search" size={18} color={colors.text.tertiary} />
+                <TextInput
+                  style={styles.searchDockInput}
+                  placeholder="Search exercises..."
+                  placeholderTextColor={colors.text.tertiary}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  returnKeyType="search"
+                />
+                {searchQuery.length > 0 ? (
+                  <Pressable onPress={() => setSearchQuery('')}>
+                    <Ionicons name="close-circle" size={18} color={colors.text.tertiary} />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -837,23 +833,46 @@ const styles = StyleSheet.create({
   },
   logButtonText: { color: colors.text.inverse, fontSize: font.lg, fontWeight: '700' },
 
-  searchBackFooter: {
+  searchFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: 24,
     backgroundColor: colors.bg.primary,
     borderTopWidth: 1,
     borderTopColor: colors.border.default,
+  },
+  searchDock: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    minHeight: 52,
+  },
+  searchDockInput: {
+    flex: 1,
+    fontSize: font.md,
+    color: colors.text.primary,
+    paddingVertical: spacing.md,
   },
   searchBackButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xl,
-    minWidth: 120,
+    minHeight: 52,
+    borderRadius: radius.lg,
+    backgroundColor: colors.bg.card,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    paddingHorizontal: spacing.lg,
   },
   searchBackButtonText: { fontSize: font.md, fontWeight: '600', color: colors.text.primary },
 
@@ -918,18 +937,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
-  searchInput: {
-    backgroundColor: colors.bg.card,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    fontSize: font.md,
-    color: colors.text.primary,
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border.default,
-  },
   groupLabel: {
     fontSize: font.xs,
     fontWeight: '700',

@@ -5,6 +5,7 @@ import {
   calculateCumulativeReadiness,
   type SetData,
 } from '@/utils/recoveryModel';
+import { getLocalDateString } from '@/utils/date';
 import { fetchSessionSets } from './workouts';
 
 /** Entry for body map / detail sheet: readiness from strain model + optional last-strain metadata */
@@ -18,6 +19,62 @@ export interface FatigueReadinessEntry {
 
 /** @deprecated Use FatigueReadinessEntry; kept for type compatibility */
 export type MuscleFatigue = FatigueReadinessEntry;
+
+interface StrainSyncSession {
+  id: string;
+  date: string;
+  completed_at: string | null;
+  is_cardio?: boolean | null;
+  set_count?: number | null;
+}
+
+function resolveSessionCompletedAt(session: StrainSyncSession): Date {
+  if (session.completed_at) return new Date(session.completed_at);
+  return new Date(`${session.date}T12:00:00`);
+}
+
+async function syncMissingWorkoutStrain(
+  userId: string,
+  sessions: StrainSyncSession[] | null | undefined,
+): Promise<boolean> {
+  const candidates = (sessions ?? []).filter(
+    (session) => !session.is_cardio && Number(session.set_count ?? 0) > 0,
+  );
+
+  if (candidates.length === 0) return false;
+
+  const sessionIds = candidates.map((session) => session.id);
+  const { data: existingRows, error: existingError } = await supabase
+    .from('muscle_strain_log')
+    .select('session_id')
+    .eq('user_id', userId)
+    .in('session_id', sessionIds);
+
+  if (existingError) throw existingError;
+
+  const existingSessionIds = new Set(
+    (existingRows ?? []).map((row: { session_id: string }) => row.session_id),
+  );
+
+  let syncedAny = false;
+
+  for (const session of candidates) {
+    if (existingSessionIds.has(session.id)) continue;
+
+    try {
+      await recordWorkoutStrain(
+        userId,
+        session.id,
+        resolveSessionCompletedAt(session),
+      );
+      syncedAny = true;
+    } catch (e) {
+      console.warn('syncMissingWorkoutStrain session', session.id, e);
+    }
+  }
+
+  return syncedAny;
+}
 
 /**
  * Fetch readiness map from strain logs (scientific model).
@@ -34,7 +91,7 @@ export async function fetchFatigueMap(userId: string): Promise<FatigueReadinessE
 export async function backfillMuscleStrainLog(userId: string): Promise<void> {
   const { data: sessions, error: sessError } = await supabase
     .from('workout_sessions')
-    .select('id, date, completed_at')
+    .select('id, date, completed_at, is_cardio, set_count')
     .eq('user_id', userId)
     .eq('completed', true)
     .or('is_rest_day.is.null,is_rest_day.eq.false')
@@ -42,29 +99,27 @@ export async function backfillMuscleStrainLog(userId: string): Promise<void> {
     .limit(200);
 
   if (sessError || !sessions?.length) return;
+  await syncMissingWorkoutStrain(userId, sessions as StrainSyncSession[]);
+}
 
-  const { data: existingSessionIds } = await supabase
-    .from('muscle_strain_log')
-    .select('session_id')
+export async function reconcileRecentWorkoutStrain(
+  userId: string,
+  fromDate: Date,
+  toDate: Date = new Date(),
+): Promise<boolean> {
+  const { data: sessions, error: sessError } = await supabase
+    .from('workout_sessions')
+    .select('id, date, completed_at, is_cardio, set_count')
     .eq('user_id', userId)
-    .limit(500);
+    .eq('completed', true)
+    .or('is_rest_day.is.null,is_rest_day.eq.false')
+    .gte('date', getLocalDateString(fromDate))
+    .lte('date', getLocalDateString(toDate))
+    .order('completed_at', { ascending: false })
+    .limit(100);
 
-  const alreadyFilled = new Set((existingSessionIds ?? []).map((r: any) => r.session_id));
-
-  for (const session of sessions) {
-    if (alreadyFilled.has(session.id)) continue;
-
-    const completedAt = session.completed_at
-      ? new Date(session.completed_at)
-      : new Date(session.date + 'T12:00:00Z');
-
-    try {
-      await recordWorkoutStrain(userId, session.id, completedAt);
-      alreadyFilled.add(session.id);
-    } catch (e) {
-      console.warn('backfillMuscleStrainLog session', session.id, e);
-    }
-  }
+  if (sessError || !sessions?.length) return false;
+  return syncMissingWorkoutStrain(userId, sessions as StrainSyncSession[]);
 }
 
 /**
@@ -89,6 +144,13 @@ export async function getBodyMapReadiness(
   if (error) throw error;
 
   const logs = strainLogs ?? [];
+  let shouldReload = false;
+
+  try {
+    shouldReload = await reconcileRecentWorkoutStrain(userId, windowStart, asOfDate);
+  } catch (syncError) {
+    console.warn('reconcileRecentWorkoutStrain', syncError);
+  }
 
   if (logs.length === 0) {
     const { data: anyExisting } = await supabase
@@ -98,15 +160,20 @@ export async function getBodyMapReadiness(
       .limit(1);
     if (!anyExisting || anyExisting.length === 0) {
       await backfillMuscleStrainLog(userId);
-      const retry = await supabase
-        .from('muscle_strain_log')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('completed_at', windowStart.toISOString())
-        .lte('completed_at', asOfDate.toISOString())
-        .order('completed_at', { ascending: false });
-      if (!retry.error) strainLogs = retry.data;
+      shouldReload = true;
     }
+  }
+
+  if (shouldReload) {
+    const retry = await supabase
+      .from('muscle_strain_log')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('completed_at', windowStart.toISOString())
+      .lte('completed_at', asOfDate.toISOString())
+      .order('completed_at', { ascending: false });
+
+    if (!retry.error) strainLogs = retry.data;
   }
 
   const finalLogs = strainLogs ?? [];
@@ -345,25 +412,40 @@ export async function recordWorkoutStrain(
   }
 
   const completedAtIso = completedAt.toISOString();
+  const rows = Object.entries(muscleSetData)
+    .filter(([muscle_group]) => muscle_group !== 'cardio')
+    .map(([muscle_group, sets]) => {
+      const strain_score = calculateMuscleStrain(muscle_group, sets);
+      const total_volume = sets.reduce((sum, s) => sum + s.weight * s.reps, 0);
+      const exercise_count = new Set(
+        sets.map((s) => s.exerciseId).filter(Boolean)
+      ).size;
 
-  for (const [muscle_group, sets] of Object.entries(muscleSetData)) {
-    if (muscle_group === 'cardio') continue;
-
-    const strain_score = calculateMuscleStrain(muscle_group, sets);
-    const total_volume = sets.reduce((sum, s) => sum + s.weight * s.reps, 0);
-    const exercise_count = new Set(sets.map((s) => s.exerciseId).filter(Boolean)).size;
-
-    const { error } = await supabase.from('muscle_strain_log').insert({
-      user_id: userId,
-      session_id: sessionId,
-      muscle_group,
-      strain_score,
-      total_volume: Math.round(total_volume * 10) / 10,
-      set_count: sets.length,
-      exercise_count,
-      completed_at: completedAtIso,
+      return {
+        user_id: userId,
+        session_id: sessionId,
+        muscle_group,
+        strain_score,
+        total_volume: Math.round(total_volume * 10) / 10,
+        set_count: sets.length,
+        exercise_count,
+        completed_at: completedAtIso,
+      };
     });
 
-    if (error) console.warn('recordWorkoutStrain insert', muscle_group, error);
-  }
+  if (rows.length === 0) return;
+
+  const { error: deleteError } = await supabase
+    .from('muscle_strain_log')
+    .delete()
+    .eq('user_id', userId)
+    .eq('session_id', sessionId);
+
+  if (deleteError) throw deleteError;
+
+  const { error: insertError } = await supabase
+    .from('muscle_strain_log')
+    .insert(rows);
+
+  if (insertError) throw insertError;
 }
