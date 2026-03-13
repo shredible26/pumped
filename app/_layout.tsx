@@ -3,18 +3,23 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthBootstrap } from '@/hooks/useAuth';
 import { useAuthStore } from '@/stores/authStore';
 import { colors } from '@/utils/theme';
 
 export default function RootLayout() {
-  const { session, profile } = useAuth();
+  useAuthBootstrap();
+
+  const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
   const initialized = useAuthStore((s) => s.initialized);
+  const profileStatus = useAuthStore((s) => s.profileStatus);
   const segments = useSegments();
   const router = useRouter();
+  const appReady = initialized && (!session || profileStatus === 'loaded' || profileStatus === 'missing');
 
   useEffect(() => {
-    if (!initialized) return;
+    if (!appReady) return;
 
     const inAuthGroup = segments[0] === '(auth)';
     const currentSegments = segments as string[];
@@ -22,21 +27,20 @@ export default function RootLayout() {
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (session) {
-      // Only show onboarding when profile has loaded and user has not completed it.
-      // Returning users (profile.onboarding_completed === true) go straight to home.
-      const needsOnboarding = profile != null && profile.onboarding_completed === false;
+      const needsOnboarding =
+        profileStatus === 'missing' ||
+        (profile != null && profile.onboarding_completed === false);
       if (needsOnboarding && !inAuthGroup) {
         router.replace('/(auth)/onboarding');
       } else if (needsOnboarding && inAuthGroup && currentSegments[1] !== 'onboarding') {
         router.replace('/(auth)/onboarding');
-      } else if ((!needsOnboarding || profile == null) && inAuthGroup) {
-        // Profile null = still loading; or onboarding done → go to home
+      } else if (!needsOnboarding && inAuthGroup) {
         router.replace('/(tabs)');
       }
     }
-  }, [session, profile, initialized, segments]);
+  }, [appReady, session, profile, profileStatus, segments]);
 
-  if (!initialized) {
+  if (!appReady) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.accent.primary} />
