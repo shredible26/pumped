@@ -19,6 +19,7 @@ import { getTodaysPlan } from '@/services/ai';
 import { createSession } from '@/services/workouts';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
 import { getGenerationCreditsRemaining, DAILY_LIMIT } from '@/services/credits';
+import { supabase } from '@/services/supabase';
 
 export default function WorkoutPreviewScreen() {
   const router = useRouter();
@@ -47,6 +48,30 @@ export default function WorkoutPreviewScreen() {
 
   const handleLogWorkout = () => {
     router.push('/workout/log');
+  };
+
+  const handleSaveWorkout = async () => {
+    if (!session?.user?.id || !plan) return;
+    try {
+      await supabase.from('saved_workouts').insert({
+        user_id: session.user.id,
+        name: plan.name || 'My Workout',
+        workout_type: (plan.type ?? null) as any,
+        exercises: (plan.exercises ?? []).map((ex) => ({
+          name: ex.name,
+          sets: ex.sets,
+        })),
+        last_used_at: new Date().toISOString(),
+        use_count: 1,
+      });
+      Alert.alert('Saved', 'Workout added to your saved workouts.');
+    } catch (err: any) {
+      Alert.alert('Error', err?.message ?? 'Failed to save workout');
+    }
+  };
+
+  const handleDone = () => {
+    router.replace('/(tabs)');
   };
 
   const handleCustomize = async () => {
@@ -126,7 +151,22 @@ export default function WorkoutPreviewScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Today's Workout</Text>
-        <View style={{ width: 24 }} />
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={handleDone}
+            hitSlop={8}
+            style={styles.headerActionButton}
+          >
+            <Text style={styles.headerActionText}>Done</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleSaveWorkout}
+            hitSlop={8}
+            style={[styles.headerActionButton, styles.headerSaveButton]}
+          >
+            <Text style={[styles.headerActionText, styles.headerSaveText]}>Save</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
@@ -210,7 +250,7 @@ export default function WorkoutPreviewScreen() {
         </Pressable>
         <Pressable style={styles.customizeButton} onPress={() => void handleCustomize()}>
           <Ionicons name="create-outline" size={20} color={colors.text.primary} />
-          <Text style={styles.customizeButtonText}>Customize Workout</Text>
+          <Text style={styles.customizeButtonText}>Regenerate</Text>
         </Pressable>
       </View>
 
@@ -274,6 +314,30 @@ const styles = StyleSheet.create({
     fontSize: font.xl,
     fontWeight: '700',
     color: colors.text.primary,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  headerActionButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+  },
+  headerActionText: {
+    fontSize: font.sm,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  headerSaveButton: {
+    backgroundColor: colors.accent.bg,
+    borderColor: colors.accent.border,
+  },
+  headerSaveText: {
+    color: colors.accent.primary,
   },
   scroll: {
     flex: 1,
