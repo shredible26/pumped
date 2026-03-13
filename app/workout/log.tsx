@@ -12,7 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
@@ -96,6 +96,7 @@ function planToLogExercises(plan: GeneratedWorkout, allExercises: Exercise[]): L
 
 export default function WorkoutLogScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
@@ -575,8 +576,8 @@ export default function WorkoutLogScreen() {
         animationType="slide"
         onRequestClose={() => setSearchOpen(false)}
       >
-        <SafeAreaView style={styles.searchContainer} edges={['top']}>
-          <View style={styles.searchHeader}>
+        <View style={styles.searchContainer}>
+          <View style={[styles.searchHeader, { paddingTop: insets.top + spacing.xl }]}>
             <View style={{ width: 60 }} />
             <Text style={styles.searchTitle}>Add Exercise</Text>
             <View style={{ width: 60 }} />
@@ -609,7 +610,9 @@ export default function WorkoutLogScreen() {
                   </Pressable>
                 ))}
             </ScrollView>
-            <View style={styles.searchFooter}>
+            <View
+              style={[styles.searchFooter, { paddingBottom: Math.max(insets.bottom, 24) }]}
+            >
               <Pressable
                 style={styles.searchBackBtn}
                 onPress={() => {
@@ -638,7 +641,7 @@ export default function WorkoutLogScreen() {
               </View>
             </View>
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
       </Modal>
 
     </SafeAreaView>

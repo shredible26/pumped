@@ -13,7 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
@@ -56,6 +56,7 @@ const MUSCLE_LABELS: Record<string, string> = {
 
 export default function ProgressScreen() {
   const session = useAuthStore((s) => s.session);
+  const insets = useSafeAreaInsets();
   const profile = useAuthStore((s) => s.profile);
   const units: Units = (profile as { units?: Units })?.units ?? 'lbs';
 
@@ -697,8 +698,13 @@ export default function ProgressScreen() {
         animationType="slide"
         onRequestClose={closeStrengthTrendPicker}
       >
-        <SafeAreaView style={styles.strengthTrendPickerScreen}>
-          <View style={styles.strengthTrendPickerHeader}>
+        <View style={styles.strengthTrendPickerScreen}>
+          <View
+            style={[
+              styles.strengthTrendPickerHeader,
+              { paddingTop: insets.top + spacing.md },
+            ]}
+          >
             <View style={styles.strengthTrendPickerHeaderSpacer} />
             <Text style={styles.strengthTrendPickerTitle}>Choose an exercise</Text>
             <View style={styles.strengthTrendPickerHeaderSpacer} />
@@ -786,7 +792,12 @@ export default function ProgressScreen() {
               )}
             </ScrollView>
 
-            <View style={styles.strengthTrendPickerFooter}>
+            <View
+              style={[
+                styles.strengthTrendPickerFooter,
+                { paddingBottom: Math.max(insets.bottom, 24) },
+              ]}
+            >
               <Pressable
                 style={styles.strengthTrendPickerBackButton}
                 onPress={closeStrengthTrendPicker}
@@ -814,7 +825,7 @@ export default function ProgressScreen() {
               </View>
             </View>
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );

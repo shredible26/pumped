@@ -12,7 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -62,6 +62,7 @@ function createDurationSet(targetSeconds?: number | null): SpeedSet {
 
 export default function SpeedLogEditorScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { type, date: dateParam } = useLocalSearchParams<{ type: string; date?: string }>();
   const sessionAuth = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
@@ -555,8 +556,8 @@ export default function SpeedLogEditorScreen() {
       )}
 
       <Modal visible={searchOpen} animationType="slide" onRequestClose={() => setSearchOpen(false)}>
-        <SafeAreaView style={styles.searchContainer} edges={['top']}>
-          <View style={styles.searchHeader}>
+        <View style={styles.searchContainer}>
+          <View style={[styles.searchHeader, { paddingTop: insets.top + spacing.md }]}>
             <View style={{ width: 60 }} />
             <Text style={styles.searchTitle}>Add Exercise</Text>
             <View style={{ width: 60 }} />
@@ -608,7 +609,9 @@ export default function SpeedLogEditorScreen() {
                 <View style={{ height: 24 }} />
               </ScrollView>
             )}
-            <View style={styles.searchFooter}>
+            <View
+              style={[styles.searchFooter, { paddingBottom: Math.max(insets.bottom, 24) }]}
+            >
               <Pressable
                 style={styles.searchBackButton}
                 onPress={() => { setSearchOpen(false); setSearchQuery(''); }}
@@ -634,7 +637,7 @@ export default function SpeedLogEditorScreen() {
               </View>
             </View>
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
