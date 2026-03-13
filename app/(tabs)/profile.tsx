@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,8 +24,7 @@ import { supabase } from '@/services/supabase';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { PROGRAM_STYLES } from '@/utils/constants';
 import { formatWeight, formatHeightInches, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
-import { getVolumeChartData } from '@/services/volume';
-import { fetchCompletedWorkoutCount } from '@/services/workouts';
+import { fetchDashboardStats } from '@/services/dashboardStats';
 
 const PROGRAM_OPTIONS = PROGRAM_STYLES.map((p) => ({
   key: p.id,
@@ -58,6 +57,7 @@ export default function ProfileScreen() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [volumeTotal, setVolumeTotal] = useState<number | null>(null);
   const [workoutCount, setWorkoutCount] = useState(0);
+  const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -76,7 +76,7 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (!session?.user?.id) return;
     const { data } = await supabase
       .from('profiles')
@@ -84,7 +84,7 @@ export default function ProfileScreen() {
       .eq('id', session.user.id)
       .single();
     if (data) setProfile(data as never);
-  };
+  }, [session?.user?.id, setProfile]);
 
   const updateField = async (
     field: string,
@@ -230,36 +230,81 @@ export default function ProfileScreen() {
     ? formatWeight(Number(profile.weight_lbs), units)
     : '—';
   const totalVolumeDisplay =
-    volumeTotal && volumeTotal > 0
+    volumeTotal != null
       ? formatVolumeWithUnit(volumeTotal, units).replace(` ${units}`, '')
       : '—';
 
   const refreshStats = useCallback(async () => {
     if (!session?.user?.id) return;
     try {
-      const { total } = await getVolumeChartData(session.user.id, 'week');
-      setVolumeTotal(total);
+      const stats = await fetchDashboardStats(session.user.id);
+      setVolumeTotal(stats.weeklyVolumeTotal);
+      setWorkoutCount(stats.workoutCount);
     } catch {
       setVolumeTotal(null);
-    }
-
-    try {
-      const count = await fetchCompletedWorkoutCount(session.user.id);
-      setWorkoutCount(count);
-    } catch {
       setWorkoutCount(0);
     }
   }, [session?.user?.id]);
 
+  const refreshScreenData = useCallback(async () => {
+    await Promise.all([refreshProfile(), refreshStats()]);
+  }, [refreshProfile, refreshStats]);
+
   useEffect(() => {
-    void refreshStats();
-  }, [refreshStats]);
+    void refreshScreenData();
+  }, [refreshScreenData]);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshStats();
-    }, [refreshStats])
+      void refreshScreenData();
+    }, [refreshScreenData])
   );
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const userId = session.user.id;
+    const scheduleRefresh = () => {
+      if (autoRefreshTimeoutRef.current) {
+        clearTimeout(autoRefreshTimeoutRef.current);
+      }
+      autoRefreshTimeoutRef.current = setTimeout(() => {
+        void refreshScreenData();
+      }, 250);
+    };
+
+    const channel = supabase
+      .channel(`profile-stats-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'workout_sessions',
+          filter: `user_id=eq.${userId}`,
+        },
+        scheduleRefresh,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${userId}`,
+        },
+        scheduleRefresh,
+      )
+      .subscribe();
+
+    return () => {
+      if (autoRefreshTimeoutRef.current) {
+        clearTimeout(autoRefreshTimeoutRef.current);
+        autoRefreshTimeoutRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [refreshScreenData, session?.user?.id]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

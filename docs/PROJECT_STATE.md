@@ -773,4 +773,3 @@ Policies:
   - Progress screen aggregates volume, distribution, Big 3, insights, and suggestions.
   - Streak is continuously updated via `updateProfileStreak` after workouts and when Today loads.
   - Profile and Progress share stat ordering and metrics (Workouts, Streak, Lbs/Kg total) but compute them independently from raw tables to stay accurate after adds/deletes.
-

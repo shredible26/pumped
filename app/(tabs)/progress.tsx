@@ -31,6 +31,7 @@ import {
   type MuscleDistributionEntry,
   type VolumeEntry,
 } from '@/services/volume';
+import { fetchDashboardStats } from '@/services/dashboardStats';
 import StrengthTrendChart from '@/components/progress/StrengthTrendChart';
 import {
   getStrengthTrendData,
@@ -38,7 +39,6 @@ import {
   type StrengthTrendData,
   type StrengthTrendExerciseOption,
 } from '@/services/strengthTrends';
-import { fetchCompletedWorkoutCount } from '@/services/workouts';
 import { supabase } from '@/services/supabase';
 import { useFocusEffect } from 'expo-router';
 
@@ -84,6 +84,7 @@ export default function ProgressScreen() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggestionsRefreshing, setSuggestionsRefreshing] = useState(false);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
+  const [weeklyVolumeTotal, setWeeklyVolumeTotal] = useState(0);
   const streak = profile?.current_streak_days ?? 0;
   const selectedStrengthTrendExerciseIdRef = useRef<string | null>(null);
   const fetchDataRef = useRef<
@@ -139,14 +140,14 @@ export default function ProgressScreen() {
         distRes,
         volRes,
         strengthTrendOptionsRes,
-        totalWorkoutsRes,
+        dashboardStatsRes,
       ] = await Promise.all([
         getProgressNarratives(userId),
         getBig3(userId),
         calculateMuscleDistribution(userId, distributionPeriod),
         getVolumeChartData(userId, volumePeriod),
         getStrengthTrendExerciseOptions(userId),
-        fetchCompletedWorkoutCount(userId),
+        fetchDashboardStats(userId),
       ]);
       setInsights(narrativesRes.insights);
       setBig3(big3Res);
@@ -154,7 +155,8 @@ export default function ProgressScreen() {
       setVolumeData(volRes);
       setSuggestions(narrativesRes.suggestions);
       setStrengthTrendOptions(strengthTrendOptionsRes);
-      setTotalWorkouts(totalWorkoutsRes);
+      setTotalWorkouts(dashboardStatsRes.workoutCount);
+      setWeeklyVolumeTotal(dashboardStatsRes.weeklyVolumeTotal);
 
       const resolvedStrengthTrendExerciseId =
         preserveStrengthSelection &&
@@ -364,7 +366,7 @@ export default function ProgressScreen() {
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>
-              {formatVolumeWithUnit(volumeData.total, units).replace(` ${units}`, '')}
+              {formatVolumeWithUnit(weeklyVolumeTotal, units).replace(` ${units}`, '')}
             </Text>
             <Text style={styles.statLabel}>
               {units === 'lbs' ? 'Lbs total' : 'Kg total'}

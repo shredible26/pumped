@@ -481,7 +481,7 @@ function selectSuggestions(
   candidates: SuggestionCandidate[],
   options?: GenerateSuggestionsOptions,
 ): string[] {
-  const limit = options?.limit ?? 4;
+  const limit = options?.limit ?? 5;
   const deduped = Array.from(
     new Map(candidates.map((candidate) => [normalizeSuggestion(candidate.text), candidate])).values(),
   ).sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));

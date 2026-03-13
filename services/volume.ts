@@ -27,7 +27,7 @@ export async function calculateMuscleDistribution(
     .select('id')
     .eq('user_id', userId)
     .eq('completed', true)
-    .eq('is_rest_day', false);
+    .or('is_rest_day.is.null,is_rest_day.eq.false');
 
   if (period === 'week') {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -105,7 +105,7 @@ export async function getVolumeChartData(
     .select('id, date, total_volume')
     .eq('user_id', userId)
     .eq('completed', true)
-    .eq('is_rest_day', false);
+    .or('is_rest_day.is.null,is_rest_day.eq.false');
 
   if (!sessions || sessions.length === 0) {
     if (period === 'week')
