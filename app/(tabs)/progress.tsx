@@ -570,6 +570,8 @@ export default function ProgressScreen() {
                 <StrengthTrendChart
                   exerciseName={strengthTrendData.exerciseName}
                   points={strengthTrendData.points}
+                  actualMax={strengthTrendData.actualMax}
+                  peerComparison={strengthTrendData.peerComparison}
                   units={units}
                 />
 

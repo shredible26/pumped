@@ -123,6 +123,4 @@ utils/          theme, date, schedule, workoutName, units, epley, recoveryModel
 - Workouts, sets, profile, fatigue, streaks, and AI plans are stored in Supabase keyed by user. Sign out clears local state; signing back in loads that user’s data. Active workout draft is cleared on sign out.
 
 ### TODO
-- The 'Lbs total' value is different in the Progress tab and the Profile tab. Make sure both values are identical and make sure only the correct 'Lbs total' value is displayed (on both screens).
-- Add 1 more suggestion so there are 5 suggestions total (in the Progress page)
-- Make speed logging faster (maybe remove 'Save Workout screen and add save button to workout summary screen instead)
+- Make sure the 'Big 3 lifts' section in 'Progress' automatically updates whenever any type of workout is logged or deleted. 

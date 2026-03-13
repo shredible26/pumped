@@ -12,11 +12,17 @@ import Svg, {
 import { format } from 'date-fns';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { formatWeight, toDisplayWeightNumber, type Units } from '@/utils/units';
-import type { StrengthTrendPoint } from '@/services/strengthTrends';
+import type {
+  StrengthTrendBestMark,
+  StrengthTrendPeerComparison,
+  StrengthTrendPoint,
+} from '@/services/strengthTrends';
 
 interface StrengthTrendChartProps {
   exerciseName: string;
   points: StrengthTrendPoint[];
+  actualMax: StrengthTrendBestMark | null;
+  peerComparison: StrengthTrendPeerComparison | null;
   units: Units;
 }
 
@@ -60,6 +66,8 @@ function getLabelIndices(length: number): Set<number> {
 export default function StrengthTrendChart({
   exerciseName,
   points,
+  actualMax,
+  peerComparison,
   units,
 }: StrengthTrendChartProps) {
   const { width: screenWidth } = useWindowDimensions();
@@ -112,6 +120,18 @@ export default function StrengthTrendChart({
         : `${delta > 0 ? '+' : ''}${Math.abs(delta).toFixed(units === 'kg' ? 1 : 0)} ${units}`;
 
   const midGuide = minValue + range / 2;
+  const actualBestLabel = actualMax
+    ? `${formatWeight(actualMax.weight, units)}${actualMax.reps ? ` x ${actualMax.reps}` : ''}`
+    : null;
+  const hasCommunityComparison =
+    peerComparison != null &&
+    peerComparison.participantCount > 1 &&
+    peerComparison.rank != null &&
+    peerComparison.betterThanPercent != null;
+  const rankLabel =
+    peerComparison?.rank != null
+      ? `#${peerComparison.rank} of ${peerComparison.participantCount}`
+      : null;
 
   return (
     <View style={styles.card}>
@@ -241,6 +261,60 @@ export default function StrengthTrendChart({
       <Text style={styles.footerSubtext}>
         {latestPoint.sessionName} on {format(new Date(`${latestPoint.sessionDate}T12:00:00`), 'MMM d, yyyy')}
       </Text>
+
+      {actualBestLabel ? (
+        <View style={styles.communityCard}>
+          <View style={styles.communityHeader}>
+            <Text style={styles.communityEyebrow}>Pumped Ranking</Text>
+            <View style={styles.communityChip}>
+              <Text style={styles.communityChipText}>Actual max only</Text>
+            </View>
+          </View>
+
+          {hasCommunityComparison ? (
+            <>
+              <View style={styles.communityScoreRow}>
+                <View style={styles.communityScoreBlock}>
+                  <Text style={styles.communityScoreValue}>
+                    {peerComparison.betterThanPercent}%
+                  </Text>
+                  <Text style={styles.communityScoreLabel}>better than Pumped users</Text>
+                </View>
+
+                <View style={styles.communityRankPill}>
+                  <Text style={styles.communityRankPillLabel}>Rank</Text>
+                  <Text style={styles.communityRankPillValue}>{rankLabel}</Text>
+                </View>
+              </View>
+
+              <Text style={styles.communityBodyText}>
+                Your best {actualBestLabel} is stronger than{' '}
+                {peerComparison.betterThanPercent}% of Pumped users who have logged{' '}
+                {exerciseName}.
+              </Text>
+
+              <Text style={styles.communityFootnote}>
+                Based on {peerComparison.participantCount} lifter
+                {peerComparison.participantCount === 1 ? '' : 's'} with a completed weighted set
+                for this exercise.
+              </Text>
+            </>
+          ) : peerComparison?.participantCount === 1 ? (
+            <>
+              <Text style={styles.communitySoloTitle}>First benchmark on Pumped</Text>
+              <Text style={styles.communityBodyText}>
+                Your best {actualBestLabel} is currently the only logged max for {exerciseName}.
+                Once more people track this lift, your percentile will show here.
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.communityBodyText}>
+              Your best {actualBestLabel} is ready. Community ranking will appear here once a
+              broader benchmark is available for {exerciseName}.
+            </Text>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -318,5 +392,96 @@ const styles = StyleSheet.create({
     fontSize: font.sm,
     color: colors.text.tertiary,
     marginTop: 2,
+  },
+  communityCard: {
+    marginTop: spacing.lg,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    backgroundColor: colors.accent.bg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+  },
+  communityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  communityEyebrow: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.accent.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  communityChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,10,15,0.32)',
+  },
+  communityChipText: {
+    fontSize: font.xs,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  communityScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  communityScoreBlock: {
+    flex: 1,
+  },
+  communityScoreValue: {
+    fontSize: 34,
+    lineHeight: 36,
+    fontWeight: '800',
+    color: colors.text.primary,
+  },
+  communityScoreLabel: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  communityRankPill: {
+    minWidth: 88,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(10,10,15,0.44)',
+    alignItems: 'center',
+  },
+  communityRankPillLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  communityRankPillValue: {
+    fontSize: font.md,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: 2,
+  },
+  communitySoloTitle: {
+    fontSize: font.lg,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: spacing.md,
+  },
+  communityBodyText: {
+    fontSize: font.sm,
+    lineHeight: 20,
+    color: colors.text.secondary,
+    marginTop: spacing.md,
+  },
+  communityFootnote: {
+    fontSize: font.xs,
+    color: colors.text.tertiary,
+    marginTop: spacing.sm,
   },
 });

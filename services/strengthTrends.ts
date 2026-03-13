@@ -44,12 +44,20 @@ export interface StrengthTrendBestMark {
   sessionDate: string;
 }
 
+export interface StrengthTrendPeerComparison {
+  participantCount: number;
+  strongerUserCount: number;
+  rank: number | null;
+  betterThanPercent: number | null;
+}
+
 export interface StrengthTrendData {
   exerciseId: string;
   exerciseName: string;
   points: StrengthTrendPoint[];
   actualMax: StrengthTrendBestMark | null;
   estimatedOneRepMax: StrengthTrendBestMark | null;
+  peerComparison: StrengthTrendPeerComparison | null;
 }
 
 function isEligibleWeightedExercise(exercise: ExerciseMeta | undefined): boolean {
@@ -82,6 +90,30 @@ async function getExerciseMeta(exerciseIds: string[]): Promise<Map<string, Exerc
 
   if (error) throw error;
   return new Map(((data ?? []) as ExerciseMeta[]).map((exercise) => [exercise.id, exercise]));
+}
+
+async function getStrengthTrendPeerComparison(
+  exerciseId: string,
+): Promise<StrengthTrendPeerComparison | null> {
+  const { data, error } = await supabase.rpc('get_exercise_strength_percentile', {
+    target_exercise_id: exerciseId,
+  });
+
+  if (error) {
+    console.warn('Strength percentile fetch error', error);
+    return null;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null;
+
+  return {
+    participantCount: Number(row.participant_count) || 0,
+    strongerUserCount: Number(row.stronger_user_count) || 0,
+    rank: row.user_rank == null ? null : Number(row.user_rank) || null,
+    betterThanPercent:
+      row.better_than_pct == null ? null : Number(row.better_than_pct) || 0,
+  };
 }
 
 export async function getStrengthTrendExerciseOptions(
@@ -180,6 +212,7 @@ export async function getStrengthTrendData(
       points: [],
       actualMax: null,
       estimatedOneRepMax: null,
+      peerComparison: null,
     };
   }
 
@@ -195,6 +228,8 @@ export async function getStrengthTrendData(
     .order('set_number', { ascending: true });
 
   if (setError) throw setError;
+
+  const peerComparisonPromise = getStrengthTrendPeerComparison(exerciseId);
 
   const setsBySession = new Map<
     string,
@@ -289,11 +324,14 @@ export async function getStrengthTrendData(
 
   points.sort((a, b) => a.completedAt.localeCompare(b.completedAt));
 
+  const peerComparison = await peerComparisonPromise;
+
   return {
     exerciseId,
     exerciseName: exercise.name,
     points,
     actualMax,
     estimatedOneRepMax,
+    peerComparison,
   };
 }
