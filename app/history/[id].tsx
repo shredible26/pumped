@@ -20,6 +20,7 @@ import { parseLocalDate } from '@/utils/date';
 import { formatWeight, formatVolumeCompact, type Units } from '@/utils/units';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
+import { supabase } from '@/services/supabase';
 import { fetchSessionById, fetchSessionSets, deleteSession, updateSession } from '@/services/workouts';
 import type { WorkoutSession, SetLog } from '@/types/workout';
 
@@ -42,6 +43,7 @@ export default function SessionDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const profile = useAuthStore((s) => s.profile);
+  const setProfile = useAuthStore((s) => s.setProfile);
   const units: Units = (profile as { units?: Units })?.units ?? 'lbs';
   const [session, setSession] = useState<WorkoutSession | null>(null);
   const [sets, setSets] = useState<SetLog[]>([]);

@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { formatWeight, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
+import { supabase } from '@/services/supabase';
 import { generateInsights, generateSuggestions, type Insight } from '@/services/insights';
 import { getBig3, type Big3Result } from '@/services/strength';
 import {
@@ -21,6 +22,7 @@ import {
   type MuscleDistributionEntry,
   type VolumeEntry,
 } from '@/services/volume';
+import { useFocusEffect } from 'expo-router';
 
 const MUSCLE_LABELS: Record<string, string> = {
   chest: 'Chest',
@@ -55,8 +57,7 @@ export default function ProgressScreen() {
   const [muscleDistribution, setMuscleDistribution] = useState<MuscleDistributionEntry[]>([]);
   const [distributionPeriod, setDistributionPeriod] = useState<'week' | 'month' | 'all'>('month');
   const [suggestions, setSuggestions] = useState<string[]>([]);
-
-  const totalWorkouts = profile?.total_workouts ?? 0;
+  const [totalWorkouts, setTotalWorkouts] = useState(0);
   const streak = profile?.current_streak_days ?? 0;
 
   const fetchData = useCallback(async () => {
@@ -75,6 +76,14 @@ export default function ProgressScreen() {
       setMuscleDistribution(distRes);
       setVolumeData(volRes);
       setSuggestions(suggestionsRes);
+
+      const { data: sessions } = await supabase
+        .from('workout_sessions')
+        .select('id, is_rest_day')
+        .eq('user_id', userId)
+        .eq('completed', true);
+      const workoutsOnly = (sessions ?? []).filter((s: any) => !s.is_rest_day);
+      setTotalWorkouts(workoutsOnly.length);
     } catch (e) {
       console.warn('Progress fetch error', e);
     }
@@ -83,6 +92,12 @@ export default function ProgressScreen() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

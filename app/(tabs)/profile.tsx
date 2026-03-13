@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,7 +23,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { PROGRAM_STYLES } from '@/utils/constants';
-import { formatWeight, formatHeightInches, type Units } from '@/utils/units';
+import { formatWeight, formatHeightInches, formatVolume as formatVolumeWithUnit, type Units } from '@/utils/units';
+import { getVolumeChartData } from '@/services/volume';
 
 const PROGRAM_OPTIONS = PROGRAM_STYLES.map((p) => ({
   key: p.id,
@@ -53,6 +55,8 @@ export default function ProfileScreen() {
     manualDeadlift: '',
   });
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [volumeTotal, setVolumeTotal] = useState<number | null>(null);
+  const [workoutCount, setWorkoutCount] = useState(0);
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -224,6 +228,42 @@ export default function ProfileScreen() {
   const weightDisplay = profile?.weight_lbs != null
     ? formatWeight(Number(profile.weight_lbs), units)
     : '—';
+  const totalVolumeDisplay =
+    volumeTotal && volumeTotal > 0
+      ? formatVolumeWithUnit(volumeTotal, units).replace(` ${units}`, '')
+      : '—';
+
+  const refreshStats = useCallback(async () => {
+    if (!session?.user?.id) return;
+    try {
+      const { total } = await getVolumeChartData(session.user.id, 'week');
+      setVolumeTotal(total);
+    } catch {
+      setVolumeTotal(null);
+    }
+
+    try {
+      const { data: sessions } = await supabase
+        .from('workout_sessions')
+        .select('id, is_rest_day')
+        .eq('user_id', session.user.id)
+        .eq('completed', true);
+      const workoutsOnly = (sessions ?? []).filter((s: any) => !s.is_rest_day);
+      setWorkoutCount(workoutsOnly.length);
+    } catch {
+      setWorkoutCount(0);
+    }
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    void refreshStats();
+  }, [refreshStats]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshStats();
+    }, [refreshStats])
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -268,20 +308,18 @@ export default function ProfileScreen() {
 
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>
-              {profile?.strength_score ? Number(profile.strength_score).toLocaleString() : '—'}
-            </Text>
-            <Text style={styles.statLabel}>Score</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{profile?.total_workouts || 0}</Text>
+            <Text style={styles.statNumber}>{workoutCount}</Text>
             <Text style={styles.statLabel}>Workouts</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{profile?.current_streak_days || 0}</Text>
             <Text style={styles.statLabel}>Streak</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{totalVolumeDisplay}</Text>
+            <Text style={styles.statLabel}>{units === 'kg' ? 'Kg total' : 'Lbs total'}</Text>
           </View>
         </View>
 
