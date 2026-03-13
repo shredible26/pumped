@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { DurationInput } from '@/components/ui/DurationInput';
+import { MinuteSecondInput } from '@/components/ui/MinuteSecondInput';
 import { useAuthStore } from '@/stores/authStore';
 import { getTodaysPlan } from '@/services/ai';
 import { fetchExercises } from '@/services/exercises';
@@ -32,12 +33,18 @@ import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
 import { getLocalDateString } from '@/utils/date';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
 import { Exercise } from '@/types/exercise';
-import { showWeightInput, showSecondsInput, isBodyweight } from '@/utils/exerciseUtils';
+import {
+  durationPartsToSeconds,
+  isDurationExercise,
+  secondsToDurationParts,
+  showWeightInput,
+} from '@/utils/exerciseUtils';
 
 interface LogSet {
   weight: string;
   reps: string;
-  seconds?: string;
+  durationMinutes?: string;
+  durationSeconds?: string;
 }
 
 interface LogExercise {
@@ -45,25 +52,44 @@ interface LogExercise {
   name: string;
   primary_muscle: string;
   equipment?: string;
+  movement_pattern?: string;
+  goal_tags?: string[];
   sets: LogSet[];
+}
+
+function createDurationSet(targetSeconds?: number | null): LogSet {
+  const { minutes, seconds } = secondsToDurationParts(targetSeconds);
+  return {
+    weight: '0',
+    reps: '0',
+    durationMinutes: minutes,
+    durationSeconds: seconds,
+  };
 }
 
 function planToLogExercises(plan: GeneratedWorkout, allExercises: Exercise[]): LogExercise[] {
   return (plan.exercises ?? []).map((ex) => {
     const full = allExercises.find((e) => e.id === ex.exercise_id);
-    const equipment = full?.equipment ?? undefined;
-    const timeBased = showSecondsInput(equipment, ex.name);
-    const bw = isBodyweight(equipment);
+    const exerciseMeta = full ?? {
+      name: ex.name,
+      equipment: undefined,
+      primary_muscle: ex.primary_muscle,
+    };
+    const durationBased = ex.target_seconds != null || isDurationExercise(exerciseMeta);
+    const allowWeight = showWeightInput(exerciseMeta);
     return {
       exercise_id: ex.exercise_id,
       name: ex.name,
       primary_muscle: ex.primary_muscle ?? '',
-      equipment,
-      sets: Array.from({ length: ex.sets }, () =>
-        timeBased
-          ? { weight: '0', reps: '0', seconds: ex.target_seconds ? String(ex.target_seconds) : '60' }
-          : { weight: bw ? '0' : String(ex.target_weight_lbs ?? 0), reps: ex.target_reps?.split('-')[0] ?? '8' }
-      ),
+      equipment: full?.equipment ?? undefined,
+      movement_pattern: full?.movement_pattern ?? undefined,
+      goal_tags: full?.goal_tags ?? undefined,
+      sets: durationBased
+        ? [createDurationSet(ex.target_seconds)]
+        : Array.from({ length: ex.sets }, () => ({
+            weight: allowWeight ? String(ex.target_weight_lbs ?? 0) : '0',
+            reps: ex.target_reps?.split('-')[0] ?? '8',
+          })),
     };
   });
 }
@@ -91,7 +117,6 @@ export default function WorkoutLogScreen() {
   } | null>(null);
   const [editWeight, setEditWeight] = useState('');
   const [editReps, setEditReps] = useState('');
-  const [editSeconds, setEditSeconds] = useState('');
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -114,11 +139,11 @@ export default function WorkoutLogScreen() {
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== exIdx) return e;
+        if (isDurationExercise(e)) return e;
         const last = e.sets[e.sets.length - 1];
         const next = {
           weight: last?.weight ?? '0',
           reps: last?.reps ?? '8',
-          ...(last?.seconds != null ? { seconds: last.seconds } : {}),
         };
         return { ...e, sets: [...e.sets, next] };
       })
@@ -134,19 +159,33 @@ export default function WorkoutLogScreen() {
     );
   };
 
-  const updateSet = (exIdx: number, setIdx: number, weight: string, reps: string, seconds?: string) => {
+  const updateSet = (
+    exIdx: number,
+    setIdx: number,
+    weight: string,
+    reps: string,
+    durationMinutes?: string,
+    durationSeconds?: string
+  ) => {
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== exIdx) return e;
         return {
           ...e,
           sets: e.sets.map((s, si) =>
-            si === setIdx ? { ...s, weight, reps, ...(seconds !== undefined ? { seconds } : {}) } : s
+            si === setIdx
+              ? {
+                  ...s,
+                  weight,
+                  reps,
+                  ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+                  ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+                }
+              : s
           ),
         };
       })
     );
-    setEditingSet(null);
   };
 
   const removeExercise = (idx: number) => {
@@ -155,13 +194,13 @@ export default function WorkoutLogScreen() {
 
   const addExercise = (ex: Exercise) => {
     if (exercises.some((e) => e.exercise_id === ex.id)) return;
-    const bw = isBodyweight(ex.equipment);
-    const timeBased = showSecondsInput(ex.equipment, ex.name);
-    const defaultSets = timeBased
-      ? [{ weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }]
-      : bw
-        ? [{ weight: '0', reps: '8' }, { weight: '0', reps: '8' }, { weight: '0', reps: '8' }]
-        : [{ weight: '135', reps: '8' }, { weight: '135', reps: '8' }, { weight: '135', reps: '8' }];
+    const durationBased = isDurationExercise(ex);
+    const allowWeight = showWeightInput(ex);
+    const defaultSets = durationBased
+      ? [createDurationSet()]
+      : allowWeight
+        ? [{ weight: '135', reps: '8' }, { weight: '135', reps: '8' }, { weight: '135', reps: '8' }]
+        : [{ weight: '0', reps: '8' }, { weight: '0', reps: '8' }, { weight: '0', reps: '8' }];
     setExercises((prev) => [
       ...prev,
       {
@@ -169,6 +208,8 @@ export default function WorkoutLogScreen() {
         name: ex.name,
         primary_muscle: ex.primary_muscle ?? '',
         equipment: ex.equipment,
+        movement_pattern: ex.movement_pattern,
+        goal_tags: ex.goal_tags,
         sets: defaultSets,
       },
     ]);
@@ -221,21 +262,25 @@ export default function WorkoutLogScreen() {
 
       exercises.forEach((ex, exIdx) => {
         let exVol = 0;
-        const useWeight = showWeightInput(ex.equipment);
-        const useSeconds = showSecondsInput(ex.equipment, ex.name);
+        const useWeight = showWeightInput(ex);
+        const useDuration = isDurationExercise(ex);
         ex.sets.forEach((set, setIdx) => {
           const w = useWeight ? (parseFloat(set.weight) || 0) : 0;
-          const r = parseInt(set.reps, 10) || 0;
-          const sec = useSeconds && set.seconds ? parseInt(set.seconds, 10) : null;
-          exVol += w * r;
+          const r = useDuration ? 0 : parseInt(set.reps, 10) || 0;
+          const sec = useDuration
+            ? durationPartsToSeconds(set.durationMinutes, set.durationSeconds)
+            : null;
+          if (!useDuration) {
+            exVol += w * r;
+          }
           setLogs.push({
             session_id: ws.id,
             exercise_id: ex.exercise_id,
             exercise_name: ex.name,
             exercise_order: exIdx,
             set_number: setIdx + 1,
-            actual_weight: useWeight ? w : null,
-            actual_reps: r,
+            actual_weight: useWeight && w > 0 ? w : null,
+            actual_reps: useDuration ? null : r,
             actual_seconds: sec ?? undefined,
             completed: true,
             is_warmup: false,
@@ -381,35 +426,80 @@ export default function WorkoutLogScreen() {
                 <Ionicons name="close" size={18} color={colors.text.tertiary} />
               </Pressable>
             </View>
-            <View style={styles.setPillRow}>
-              {ex.sets.map((set, setIdx) => {
-                const showW = showWeightInput(ex.equipment);
-                const showSec = showSecondsInput(ex.equipment, ex.name);
-                const label = showSec && set.seconds
-                  ? `${set.seconds}s`
-                  : showW
+            {isDurationExercise(ex) ? (
+              <View style={styles.durationEntryCard}>
+                <View style={styles.durationEntryHeader}>
+                  <View style={styles.durationEntryBadge}>
+                    <Text style={styles.durationEntryBadgeText}>Duration</Text>
+                  </View>
+                  <Text style={styles.durationEntryHint}>Single entry</Text>
+                </View>
+
+                {showWeightInput(ex) ? (
+                  <View style={styles.durationWeightWrap}>
+                    <Text style={styles.durationFieldLabel}>Weight (lbs)</Text>
+                    <TextInput
+                      style={styles.durationWeightInput}
+                      value={ex.sets[0]?.weight ?? '0'}
+                      onChangeText={(value) =>
+                        updateSet(
+                          exIdx,
+                          0,
+                          value,
+                          '0',
+                          ex.sets[0]?.durationMinutes,
+                          ex.sets[0]?.durationSeconds
+                        )
+                      }
+                      keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor={colors.text.tertiary}
+                      selectTextOnFocus
+                    />
+                  </View>
+                ) : null}
+
+                <MinuteSecondInput
+                  minutes={ex.sets[0]?.durationMinutes ?? ''}
+                  seconds={ex.sets[0]?.durationSeconds ?? ''}
+                  onMinutesChange={(value) =>
+                    updateSet(exIdx, 0, ex.sets[0]?.weight ?? '0', '0', value, ex.sets[0]?.durationSeconds)
+                  }
+                  onSecondsChange={(value) =>
+                    updateSet(exIdx, 0, ex.sets[0]?.weight ?? '0', '0', ex.sets[0]?.durationMinutes, value)
+                  }
+                />
+                <Text style={styles.durationEntryHelper}>
+                  Leave either box blank if you only want to log part of the time.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.setPillRow}>
+                {ex.sets.map((set, setIdx) => {
+                  const showW = showWeightInput(ex);
+                  const label = showW
                     ? `${set.weight} × ${set.reps}`
                     : `${set.reps} reps`;
-                return (
-                  <Pressable
-                    key={setIdx}
-                    style={styles.setPill}
-                    onPress={() => {
-                      setEditWeight(set.weight);
-                      setEditReps(set.reps);
-                      setEditSeconds(set.seconds ?? '');
-                      setEditingSet({ exIdx, setIdx });
-                    }}
-                    onLongPress={() => removeSet(exIdx, setIdx)}
-                  >
-                    <Text style={styles.setPillText}>{label}</Text>
-                  </Pressable>
-                );
-              })}
-              <Pressable style={styles.addSetButton} onPress={() => addSet(exIdx)}>
-                <Text style={styles.addSetButtonText}>Add</Text>
-              </Pressable>
-            </View>
+                  return (
+                    <Pressable
+                      key={setIdx}
+                      style={styles.setPill}
+                      onPress={() => {
+                        setEditWeight(set.weight);
+                        setEditReps(set.reps);
+                        setEditingSet({ exIdx, setIdx });
+                      }}
+                      onLongPress={() => removeSet(exIdx, setIdx)}
+                    >
+                      <Text style={styles.setPillText}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable style={styles.addSetButton} onPress={() => addSet(exIdx)}>
+                  <Text style={styles.addSetButtonText}>Add</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         ))}
 
@@ -456,7 +546,7 @@ export default function WorkoutLogScreen() {
           <View style={styles.editSheet}>
             <Text style={styles.editTitle}>Edit Set</Text>
             <View style={styles.editRow}>
-              {editingSet && showWeightInput(exercises[editingSet.exIdx]?.equipment) && (
+              {editingSet && showWeightInput(exercises[editingSet.exIdx]) && (
                 <View style={{ flex: 1 }}>
                   <Text style={styles.editLabel}>Weight (lbs)</Text>
                   <TextInput
@@ -467,28 +557,15 @@ export default function WorkoutLogScreen() {
                   />
                 </View>
               )}
-              {editingSet && showSecondsInput(exercises[editingSet.exIdx]?.equipment, exercises[editingSet.exIdx]?.name) ? (
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.editLabel}>Seconds</Text>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editSeconds}
-                    onChangeText={setEditSeconds}
-                    keyboardType="numeric"
-                    placeholder="sec"
-                  />
-                </View>
-              ) : (
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.editLabel}>Reps</Text>
-                  <TextInput
-                    style={styles.editInput}
-                    value={editReps}
-                    onChangeText={setEditReps}
-                    keyboardType="numeric"
-                  />
-                </View>
-              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.editLabel}>Reps</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editReps}
+                  onChangeText={setEditReps}
+                  keyboardType="numeric"
+                />
+              </View>
             </View>
             <View style={styles.editActionsRow}>
               <Pressable
@@ -507,15 +584,8 @@ export default function WorkoutLogScreen() {
                 style={styles.editOkBtn}
                 onPress={() => {
                   if (editingSet) {
-                    const ex = exercises[editingSet.exIdx];
-                    const isSec = showSecondsInput(ex?.equipment, ex?.name);
-                    updateSet(
-                      editingSet.exIdx,
-                      editingSet.setIdx,
-                      editWeight,
-                      isSec ? '0' : editReps,
-                      isSec ? editSeconds : undefined
-                    );
+                    updateSet(editingSet.exIdx, editingSet.setIdx, editWeight, editReps);
+                    setEditingSet(null);
                   }
                 }}
               >
@@ -697,6 +767,66 @@ const styles = StyleSheet.create({
     borderColor: colors.border.default,
   },
   setPillText: { fontSize: font.sm, fontWeight: '600', color: colors.text.primary },
+  durationEntryCard: {
+    backgroundColor: colors.bg.input,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  durationEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  durationEntryBadge: {
+    backgroundColor: colors.accent.bg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  durationEntryBadgeText: {
+    color: colors.accent.primary,
+    fontSize: font.xs,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  durationEntryHint: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    fontWeight: '600',
+  },
+  durationWeightWrap: {
+    marginBottom: spacing.xs,
+  },
+  durationFieldLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
+  durationWeightInput: {
+    minHeight: 48,
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    color: colors.text.primary,
+    fontSize: font.xl,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  durationEntryHelper: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
   addSetPill: {
     width: 32,
     height: 32,

@@ -9,11 +9,12 @@ import { supabase } from '@/services/supabase';
 
 export default function SpeedLogSaveScreen() {
   const router = useRouter();
-  const { type, workoutName: paramWorkoutName, exerciseNames, exerciseSets } = useLocalSearchParams<{
+  const { type, workoutName: paramWorkoutName, exerciseNames, exerciseSets, sessionId } = useLocalSearchParams<{
     type: string;
     workoutName?: string;
     exerciseNames: string;
     exerciseSets: string;
+    sessionId?: string;
   }>();
   const session = useAuthStore((s) => s.session);
 
@@ -41,18 +42,19 @@ export default function SpeedLogSaveScreen() {
       });
     } catch {}
     setSaving(false);
-    goBackToToday();
+    goToSummary();
   };
 
   const handleSkip = () => {
-    goBackToToday();
+    goToSummary();
   };
 
-  /** Dismiss the whole speedlog modal stack (save → editor → index) so we land on Today without duplicating it. */
-  function goBackToToday() {
-    router.dismiss();
-    setTimeout(() => router.dismiss(), 50);
-    setTimeout(() => router.dismiss(), 120);
+  function goToSummary() {
+    if (sessionId) {
+      router.replace(`/workout/summary?sessionId=${sessionId}`);
+      return;
+    }
+    router.replace('/(tabs)');
   }
 
   return (

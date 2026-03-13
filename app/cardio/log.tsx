@@ -55,7 +55,7 @@ export default function CardioLogScreen() {
     setSaving(true);
     try {
       const durationSec = durationMinutes * 60;
-      await createSession({
+      const ws = await createSession({
         user_id: session.user.id,
         date: getLocalDateString(),
         name: selectedExercise.name,
@@ -80,7 +80,7 @@ export default function CardioLogScreen() {
         .single();
       if (profileData) setProfile({ ...profileData, ...streakResult } as any);
 
-      router.replace('/(tabs)');
+      router.replace(`/workout/summary?sessionId=${ws.id}`);
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Failed to save cardio.');
     } finally {

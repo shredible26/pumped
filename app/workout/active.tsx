@@ -15,8 +15,15 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, spacing, radius } from '@/utils/theme';
+import { MinuteSecondInput } from '@/components/ui/MinuteSecondInput';
 import { useWorkoutStore } from '@/stores/workoutStore';
-import { showWeightInput, showSecondsInput } from '@/utils/exerciseUtils';
+import {
+  durationPartsToSeconds,
+  formatDurationLabel,
+  isDurationExercise,
+  secondsToDurationParts,
+  showWeightInput,
+} from '@/utils/exerciseUtils';
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
@@ -44,17 +51,20 @@ export default function ActiveWorkoutScreen() {
 
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState('');
-  const [seconds, setSeconds] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState('');
+  const [durationSeconds, setDurationSeconds] = useState('');
   const [restCountdown, setRestCountdown] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (exercise) {
-      const isBw = !showWeightInput(exercise.equipment);
-      const timeBased = showSecondsInput(exercise.equipment, exercise.name);
-      setWeight(isBw ? '0' : (exercise.target_weight > 0 ? String(exercise.target_weight) : ''));
-      setReps(timeBased ? '0' : (exercise.target_reps.split('-')[0] || '8'));
-      setSeconds(timeBased ? String(exercise.target_seconds ?? 60) : '');
+      const allowWeight = showWeightInput(exercise);
+      const durationBased = isDurationExercise(exercise);
+      const defaultDuration = secondsToDurationParts(exercise.target_seconds);
+      setWeight(allowWeight ? (exercise.target_weight > 0 ? String(exercise.target_weight) : '') : '0');
+      setReps(durationBased ? '0' : (exercise.target_reps.split('-')[0] || '8'));
+      setDurationMinutes(durationBased ? defaultDuration.minutes : '');
+      setDurationSeconds(durationBased ? defaultDuration.seconds : '');
     }
   }, [currentExIndex, exercise]);
 
@@ -79,22 +89,20 @@ export default function ActiveWorkoutScreen() {
   }, [isResting, restSeconds]);
 
   const handleCompleteSet = useCallback(() => {
-    const timeBased = exercise && showSecondsInput(exercise.equipment, exercise.name);
+    const durationBased = exercise && isDurationExercise(exercise);
     const w = parseFloat(weight) || 0;
     const r = parseInt(reps, 10) || 0;
-    const sec = timeBased ? (parseInt(seconds, 10) || 0) : undefined;
-    if (!timeBased && r <= 0) {
+    const sec = durationBased
+      ? durationPartsToSeconds(durationMinutes, durationSeconds) ?? undefined
+      : undefined;
+    if (!durationBased && r <= 0) {
       Alert.alert('Enter reps', 'Please enter the number of reps completed.');
-      return;
-    }
-    if (timeBased && (sec ?? 0) <= 0) {
-      Alert.alert('Enter seconds', 'Please enter the duration in seconds.');
       return;
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    logSet(w, timeBased ? 0 : r, timeBased ? sec : undefined);
-  }, [weight, reps, seconds, exercise, logSet]);
+    logSet(w, durationBased ? 0 : r, sec);
+  }, [weight, reps, durationMinutes, durationSeconds, exercise, logSet]);
 
   const handleSkipRest = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -127,6 +135,8 @@ export default function ActiveWorkoutScreen() {
   }, [completedSets, reset, router]);
 
   const allDone = getAllExerciseComplete();
+  const durationBased = isDurationExercise(exercise);
+  const allowWeight = showWeightInput(exercise);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -210,8 +220,10 @@ export default function ActiveWorkoutScreen() {
           {/* Set Rows */}
           <View style={styles.setHeader}>
             <Text style={[styles.setHeaderText, { flex: 0.5 }]}>SET</Text>
-            <Text style={[styles.setHeaderText, { flex: 1 }]}>WEIGHT</Text>
-            <Text style={[styles.setHeaderText, { flex: 1 }]}>REPS</Text>
+            {allowWeight && <Text style={[styles.setHeaderText, { flex: 1 }]}>WEIGHT</Text>}
+            <Text style={[styles.setHeaderText, { flex: durationBased ? 1.5 : 1 }]}>
+              {durationBased ? 'DURATION' : 'REPS'}
+            </Text>
             <Text style={[styles.setHeaderText, { flex: 0.5 }]} />
           </View>
 
@@ -239,24 +251,24 @@ export default function ActiveWorkoutScreen() {
 
                 {completed ? (
                   <>
-                    {showWeightInput(exercise.equipment) && (
+                    {allowWeight && (
                       <View style={[styles.setField, { flex: 1 }]}>
                         <Text style={styles.completedFieldText}>
                           {setData?.weight ?? 0} lbs
                         </Text>
                       </View>
                     )}
-                    <View style={[styles.setField, { flex: 1 }]}>
+                    <View style={[styles.setField, { flex: durationBased ? 1.5 : 1 }]}>
                       <Text style={styles.completedFieldText}>
                         {setData?.seconds != null
-                          ? `${setData.seconds}s`
+                          ? formatDurationLabel(setData.seconds)
                           : `${setData?.reps ?? 0} reps`}
                       </Text>
                     </View>
                   </>
                 ) : isCurrent ? (
                   <>
-                    {showWeightInput(exercise.equipment) && (
+                    {allowWeight && (
                       <TextInput
                         style={[styles.setInput, { flex: 1 }]}
                         value={weight}
@@ -267,16 +279,15 @@ export default function ActiveWorkoutScreen() {
                         selectTextOnFocus
                       />
                     )}
-                    {showSecondsInput(exercise.equipment, exercise.name) ? (
-                      <TextInput
-                        style={[styles.setInput, { flex: 1 }]}
-                        value={seconds}
-                        onChangeText={setSeconds}
-                        keyboardType="numeric"
-                        placeholder="sec"
-                        placeholderTextColor={colors.text.tertiary}
-                        selectTextOnFocus
-                      />
+                    {durationBased ? (
+                      <View style={[styles.durationSetInputWrap, { flex: 1.5 }]}>
+                        <MinuteSecondInput
+                          minutes={durationMinutes}
+                          seconds={durationSeconds}
+                          onMinutesChange={setDurationMinutes}
+                          onSecondsChange={setDurationSeconds}
+                        />
+                      </View>
                     ) : (
                       <TextInput
                         style={[styles.setInput, { flex: 1 }]}
@@ -291,7 +302,7 @@ export default function ActiveWorkoutScreen() {
                   </>
                 ) : (
                   <>
-                    {showWeightInput(exercise.equipment) && (
+                    {allowWeight && (
                       <View style={[styles.setField, { flex: 1 }]}>
                         <Text style={styles.pendingFieldText}>
                           {exercise.target_weight > 0
@@ -300,10 +311,12 @@ export default function ActiveWorkoutScreen() {
                         </Text>
                       </View>
                     )}
-                    <View style={[styles.setField, { flex: 1 }]}>
+                    <View style={[styles.setField, { flex: durationBased ? 1.5 : 1 }]}>
                       <Text style={styles.pendingFieldText}>
-                        {showSecondsInput(exercise.equipment, exercise.name)
-                          ? `${exercise.target_seconds ?? 60}s`
+                        {durationBased
+                          ? exercise.target_seconds
+                            ? formatDurationLabel(exercise.target_seconds)
+                            : 'Optional'
                           : `${exercise.target_reps} reps`}
                       </Text>
                     </View>
@@ -516,6 +529,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     borderWidth: 1,
     borderColor: colors.border.light,
+  },
+  durationSetInputWrap: {
+    paddingVertical: spacing.xs,
   },
   setField: {
     paddingVertical: spacing.md,

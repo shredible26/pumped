@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { colors, font, spacing, radius } from '@/utils/theme';
 import { DurationInput } from '@/components/ui/DurationInput';
+import { MinuteSecondInput } from '@/components/ui/MinuteSecondInput';
 import { REST_DURATIONS } from '@/utils/constants';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchExercises } from '@/services/exercises';
@@ -30,17 +31,33 @@ import { supabase } from '@/services/supabase';
 import { Exercise } from '@/types/exercise';
 import { e1rm } from '@/utils/epley';
 import { clearActiveWorkout } from '@/utils/storage';
-import { showWeightInput, showSecondsInput, isBodyweight } from '@/utils/exerciseUtils';
+import {
+  durationPartsToSeconds,
+  isDurationExercise,
+  secondsToDurationParts,
+  showWeightInput,
+} from '@/utils/exerciseUtils';
 
 interface SpeedSet {
   weight: string;
   reps: string;
-  seconds?: string;
+  durationMinutes?: string;
+  durationSeconds?: string;
 }
 
 interface SpeedExercise {
   exercise: Exercise;
   sets: SpeedSet[];
+}
+
+function createDurationSet(targetSeconds?: number | null): SpeedSet {
+  const { minutes, seconds } = secondsToDurationParts(targetSeconds);
+  return {
+    weight: '0',
+    reps: '0',
+    durationMinutes: minutes,
+    durationSeconds: seconds,
+  };
 }
 
 export default function SpeedLogEditorScreen() {
@@ -64,7 +81,6 @@ export default function SpeedLogEditorScreen() {
   } | null>(null);
   const [editWeight, setEditWeight] = useState('');
   const [editReps, setEditReps] = useState('');
-  const [editSeconds, setEditSeconds] = useState('');
 
   useEffect(() => {
     loadExercises();
@@ -108,13 +124,13 @@ export default function SpeedLogEditorScreen() {
 
   const addExercise = (exercise: Exercise) => {
     if (exercises.some((e) => e.exercise.id === exercise.id)) return;
-    const bw = isBodyweight(exercise.equipment);
-    const timeBased = showSecondsInput(exercise.equipment, exercise.name);
-    const defaultSets = timeBased
-      ? [{ weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }, { weight: '0', reps: '0', seconds: '60' }]
-      : bw
-        ? [{ weight: '0', reps: '8' }, { weight: '0', reps: '8' }, { weight: '0', reps: '8' }]
-        : [{ weight: '135', reps: '8' }, { weight: '135', reps: '8' }, { weight: '135', reps: '8' }];
+    const durationBased = isDurationExercise(exercise);
+    const allowWeight = showWeightInput(exercise);
+    const defaultSets = durationBased
+      ? [createDurationSet()]
+      : allowWeight
+        ? [{ weight: '135', reps: '8' }, { weight: '135', reps: '8' }, { weight: '135', reps: '8' }]
+        : [{ weight: '0', reps: '8' }, { weight: '0', reps: '8' }, { weight: '0', reps: '8' }];
     setExercises((prev) => [
       ...prev,
       { exercise, sets: defaultSets },
@@ -131,11 +147,11 @@ export default function SpeedLogEditorScreen() {
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== exIdx) return e;
+        if (isDurationExercise(e.exercise)) return e;
         const lastSet = e.sets[e.sets.length - 1];
         const next = {
           weight: lastSet?.weight ?? '0',
           reps: lastSet?.reps ?? '8',
-          ...(lastSet?.seconds != null ? { seconds: lastSet.seconds } : {}),
         };
         return { ...e, sets: [...e.sets, next] };
       }),
@@ -155,14 +171,11 @@ export default function SpeedLogEditorScreen() {
     const s = exercises[exIdx].sets[setIdx];
     setEditWeight(s.weight);
     setEditReps(s.reps);
-    setEditSeconds(s.seconds ?? '');
     setEditingSet({ exIdx, setIdx });
   };
 
   const confirmEditSet = () => {
     if (!editingSet) return;
-    const ex = exercises[editingSet.exIdx];
-    const isSec = showSecondsInput(ex.exercise.equipment, ex.exercise.name);
     setExercises((prev) =>
       prev.map((e, i) => {
         if (i !== editingSet.exIdx) return e;
@@ -170,7 +183,7 @@ export default function SpeedLogEditorScreen() {
           ...e,
           sets: e.sets.map((s, si) =>
             si === editingSet.setIdx
-              ? { ...s, weight: editWeight, reps: isSec ? '0' : editReps, ...(isSec ? { seconds: editSeconds } : {}) }
+              ? { ...s, weight: editWeight, reps: editReps }
               : s,
           ),
         };
@@ -234,21 +247,25 @@ export default function SpeedLogEditorScreen() {
 
       exercises.forEach((ex, exIdx) => {
         let exVol = 0;
-        const useWeight = showWeightInput(ex.exercise.equipment);
-        const useSeconds = showSecondsInput(ex.exercise.equipment, ex.exercise.name);
+        const useWeight = showWeightInput(ex.exercise);
+        const useDuration = isDurationExercise(ex.exercise);
         ex.sets.forEach((set, setIdx) => {
           const w = useWeight ? (parseFloat(set.weight) || 0) : 0;
-          const r = parseInt(set.reps, 10) || 0;
-          const sec = useSeconds && set.seconds ? parseInt(set.seconds, 10) : null;
-          exVol += w * r;
+          const r = useDuration ? 0 : parseInt(set.reps, 10) || 0;
+          const sec = useDuration
+            ? durationPartsToSeconds(set.durationMinutes, set.durationSeconds)
+            : null;
+          if (!useDuration) {
+            exVol += w * r;
+          }
           setLogs.push({
             session_id: ws.id,
             exercise_id: ex.exercise.id,
             exercise_name: ex.exercise.name,
             exercise_order: exIdx,
             set_number: setIdx + 1,
-            actual_weight: useWeight ? w : null,
-            actual_reps: r,
+            actual_weight: useWeight && w > 0 ? w : null,
+            actual_reps: useDuration ? null : r,
             actual_seconds: sec ?? undefined,
             completed: true,
             is_warmup: false,
@@ -293,6 +310,7 @@ export default function SpeedLogEditorScreen() {
       router.push({
         pathname: '/speedlog/save',
         params: {
+          sessionId: ws.id,
           type: type ?? 'Custom',
           workoutName: workoutName.trim() || `My ${type ?? 'Custom'} Day`,
           exerciseNames: exercises.map((e) => e.exercise.name).join('|'),
@@ -360,30 +378,102 @@ export default function SpeedLogEditorScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.setPillRow}>
-              {ex.sets.map((set, setIdx) => {
-                const showW = showWeightInput(ex.exercise.equipment);
-                const showSec = showSecondsInput(ex.exercise.equipment, ex.exercise.name);
-                const label = showSec && set.seconds
-                  ? `${set.seconds}s`
-                  : showW
+            {isDurationExercise(ex.exercise) ? (
+              <View style={styles.durationEntryCard}>
+                <View style={styles.durationEntryHeader}>
+                  <View style={styles.durationEntryBadge}>
+                    <Text style={styles.durationEntryBadgeText}>Duration</Text>
+                  </View>
+                  <Text style={styles.durationEntryHint}>Single entry</Text>
+                </View>
+
+                {showWeightInput(ex.exercise) ? (
+                  <View style={styles.durationWeightWrap}>
+                    <Text style={styles.durationFieldLabel}>Weight (lbs)</Text>
+                    <TextInput
+                      style={styles.durationWeightInput}
+                      value={ex.sets[0]?.weight ?? '0'}
+                      onChangeText={(value) =>
+                        setExercises((prev) =>
+                          prev.map((item, index) =>
+                            index === exIdx
+                              ? {
+                                  ...item,
+                                  sets: item.sets.map((set, setIdx) =>
+                                    setIdx === 0 ? { ...set, weight: value } : set
+                                  ),
+                                }
+                              : item
+                          )
+                        )
+                      }
+                      keyboardType="numeric"
+                      placeholder="0"
+                      placeholderTextColor={colors.text.tertiary}
+                      selectTextOnFocus
+                    />
+                  </View>
+                ) : null}
+
+                <MinuteSecondInput
+                  minutes={ex.sets[0]?.durationMinutes ?? ''}
+                  seconds={ex.sets[0]?.durationSeconds ?? ''}
+                  onMinutesChange={(value) =>
+                    setExercises((prev) =>
+                      prev.map((item, index) =>
+                        index === exIdx
+                          ? {
+                              ...item,
+                              sets: item.sets.map((set, setIdx) =>
+                                setIdx === 0 ? { ...set, durationMinutes: value } : set
+                              ),
+                            }
+                          : item
+                      )
+                    )
+                  }
+                  onSecondsChange={(value) =>
+                    setExercises((prev) =>
+                      prev.map((item, index) =>
+                        index === exIdx
+                          ? {
+                              ...item,
+                              sets: item.sets.map((set, setIdx) =>
+                                setIdx === 0 ? { ...set, durationSeconds: value } : set
+                              ),
+                            }
+                          : item
+                      )
+                    )
+                  }
+                />
+                <Text style={styles.durationEntryHelper}>
+                  Leave either box blank if you only want to log part of the time.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.setPillRow}>
+                {ex.sets.map((set, setIdx) => {
+                  const showW = showWeightInput(ex.exercise);
+                  const label = showW
                     ? `${set.weight} × ${set.reps}`
                     : `${set.reps} reps`;
-                return (
-                  <Pressable
-                    key={setIdx}
-                    style={styles.setPill}
-                    onPress={() => startEditSet(exIdx, setIdx)}
-                    onLongPress={() => removeSet(exIdx, setIdx)}
-                  >
-                    <Text style={styles.setPillText}>{label}</Text>
-                  </Pressable>
-                );
-              })}
-              <Pressable style={styles.addSetPill} onPress={() => addSet(exIdx)}>
-                <Ionicons name="add" size={16} color={colors.accent.primary} />
-              </Pressable>
-            </View>
+                  return (
+                    <Pressable
+                      key={setIdx}
+                      style={styles.setPill}
+                      onPress={() => startEditSet(exIdx, setIdx)}
+                      onLongPress={() => removeSet(exIdx, setIdx)}
+                    >
+                      <Text style={styles.setPillText}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable style={styles.addSetPill} onPress={() => addSet(exIdx)}>
+                  <Ionicons name="add" size={16} color={colors.accent.primary} />
+                </Pressable>
+              </View>
+            )}
           </View>
         ))}
 
@@ -431,7 +521,7 @@ export default function SpeedLogEditorScreen() {
               <Pressable>
                 <Text style={styles.editTitle}>Edit Set</Text>
                 <View style={styles.editRow}>
-                  {editingSet && showWeightInput(exercises[editingSet.exIdx]?.exercise?.equipment) && (
+                  {editingSet && showWeightInput(exercises[editingSet.exIdx]?.exercise) && (
                     <View style={{ flex: 1 }}>
                       <Text style={styles.editLabel}>Weight (lbs)</Text>
                       <TextInput
@@ -443,30 +533,16 @@ export default function SpeedLogEditorScreen() {
                       />
                     </View>
                   )}
-                  {editingSet && showSecondsInput(exercises[editingSet.exIdx]?.exercise?.equipment, exercises[editingSet.exIdx]?.exercise?.name) ? (
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.editLabel}>Seconds</Text>
-                      <TextInput
-                        style={styles.editInput}
-                        value={editSeconds}
-                        onChangeText={setEditSeconds}
-                        keyboardType="numeric"
-                        placeholder="sec"
-                        selectTextOnFocus
-                      />
-                    </View>
-                  ) : (
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.editLabel}>Reps</Text>
-                      <TextInput
-                        style={styles.editInput}
-                        value={editReps}
-                        onChangeText={setEditReps}
-                        keyboardType="numeric"
-                        selectTextOnFocus
-                      />
-                    </View>
-                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.editLabel}>Reps</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      value={editReps}
+                      onChangeText={setEditReps}
+                      keyboardType="numeric"
+                      selectTextOnFocus
+                    />
+                  </View>
                 </View>
                 <View style={styles.editActionsRow}>
                   <Pressable
@@ -649,6 +725,66 @@ const styles = StyleSheet.create({
     borderColor: colors.border.default,
   },
   setPillText: { fontSize: font.sm, fontWeight: '600', color: colors.text.primary },
+  durationEntryCard: {
+    backgroundColor: colors.bg.input,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  durationEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  durationEntryBadge: {
+    backgroundColor: colors.accent.bg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  durationEntryBadgeText: {
+    color: colors.accent.primary,
+    fontSize: font.xs,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  durationEntryHint: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    fontWeight: '600',
+  },
+  durationWeightWrap: {
+    marginBottom: spacing.xs,
+  },
+  durationFieldLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
+  durationWeightInput: {
+    minHeight: 48,
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    color: colors.text.primary,
+    fontSize: font.xl,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  durationEntryHelper: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
   addSetPill: {
     width: 32,
     height: 32,
@@ -813,4 +949,3 @@ const styles = StyleSheet.create({
   searchItemName: { fontSize: font.md, fontWeight: '600', color: colors.text.primary },
   searchItemMeta: { fontSize: font.sm, color: colors.text.secondary, marginTop: 1 },
 });
-

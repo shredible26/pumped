@@ -20,6 +20,7 @@ import { fetchExercises } from '@/services/exercises';
 import { supabase } from '@/services/supabase';
 import { e1rm } from '@/utils/epley';
 import { clearActiveWorkout } from '@/utils/storage';
+import { isDurationExercise } from '@/utils/exerciseUtils';
 
 interface SummaryData {
   duration: number;
@@ -105,14 +106,6 @@ export default function WorkoutSummaryScreen() {
     }
   }, [session?.user?.id, setProfile]);
 
-  useEffect(() => {
-    if (fromLogFlow && urlSessionId) {
-      loadSummaryFromSession(urlSessionId);
-    } else {
-      finalizeWorkout();
-    }
-  }, [fromLogFlow, urlSessionId]);
-
   const finalizeWorkout = useCallback(async () => {
     if (!session?.user?.id || !sessionId) {
       setSaving(false);
@@ -133,8 +126,9 @@ export default function WorkoutSummaryScreen() {
       for (const cs of completedSets) {
         const ex = exercises[cs.exerciseIndex];
         if (!ex) continue;
+        const durationBased = isDurationExercise(ex);
 
-        const vol = cs.weight * cs.reps;
+        const vol = durationBased ? 0 : cs.weight * cs.reps;
         totalVolume += vol;
         volByExIndex.set(cs.exerciseIndex, (volByExIndex.get(cs.exerciseIndex) ?? 0) + vol);
 
@@ -145,10 +139,10 @@ export default function WorkoutSummaryScreen() {
           exercise_order: cs.exerciseIndex,
           set_number: cs.setIndex + 1,
           target_weight: ex.target_weight || null,
-          target_reps: parseInt(ex.target_reps.split('-')[0], 10) || null,
-          actual_weight: cs.weight,
-          actual_reps: cs.reps,
-          actual_seconds: cs.seconds ?? undefined,
+          target_reps: durationBased ? null : parseInt(ex.target_reps.split('-')[0], 10) || null,
+          actual_weight: cs.weight > 0 ? cs.weight : null,
+          actual_reps: durationBased ? null : cs.reps,
+          actual_seconds: durationBased ? cs.seconds ?? undefined : undefined,
           is_warmup: false,
           is_pr: false,
           completed: true,
@@ -298,6 +292,14 @@ export default function WorkoutSummaryScreen() {
     }
   }, [sessionId, exercises, completedSets, startedAt, session?.user?.id, profile]);
 
+  useEffect(() => {
+    if (fromLogFlow && urlSessionId) {
+      loadSummaryFromSession(urlSessionId);
+    } else {
+      finalizeWorkout();
+    }
+  }, [fromLogFlow, urlSessionId, loadSummaryFromSession, finalizeWorkout]);
+
   const handleGoHome = () => {
     reset();
     router.replace('/(tabs)');
@@ -308,7 +310,9 @@ export default function WorkoutSummaryScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContent}>
           <ActivityIndicator size="large" color={colors.accent.primary} />
-          <Text style={styles.savingText}>Saving workout...</Text>
+          <Text style={styles.savingText}>
+            {fromLogFlow ? 'Loading summary...' : 'Saving workout...'}
+          </Text>
         </View>
       </SafeAreaView>
     );

@@ -24,7 +24,7 @@ import { fetchExercises } from '@/services/exercises';
 import { createSession } from '@/services/workouts';
 import { getLocalDateString } from '@/utils/date';
 import { Exercise } from '@/types/exercise';
-import { showSecondsInput } from '@/utils/exerciseUtils';
+import { isDurationExercise } from '@/utils/exerciseUtils';
 
 interface CustomExercise {
   exercise: Exercise;
@@ -86,9 +86,10 @@ export default function CustomWorkoutScreen() {
       (e) => e.exercise.id === exercise.id,
     );
     if (alreadyAdded) return;
+    const durationBased = isDurationExercise(exercise);
     setExercises((prev) => [
       ...prev,
-      { exercise, sets: 3, targetReps: '8-12' },
+      { exercise, sets: durationBased ? 1 : 3, targetReps: durationBased ? '' : '8-12' },
     ]);
     setSearchOpen(false);
     setSearchQuery('');
@@ -101,7 +102,11 @@ export default function CustomWorkoutScreen() {
   const adjustSets = (index: number, delta: number) => {
     setExercises((prev) =>
       prev.map((e, i) =>
-        i === index ? { ...e, sets: Math.max(1, Math.min(10, e.sets + delta)) } : e,
+        i === index
+          ? isDurationExercise(e.exercise)
+            ? { ...e, sets: 1 }
+            : { ...e, sets: Math.max(1, Math.min(10, e.sets + delta)) }
+          : e,
       ),
     );
   };
@@ -137,17 +142,17 @@ export default function CustomWorkoutScreen() {
             ? REST_DURATIONS.secondary_compound
             : REST_DURATIONS.isolation;
 
-        const timeBased = showSecondsInput(e.exercise.equipment, e.exercise.name);
+        const timeBased = isDurationExercise(e.exercise);
         return {
           exercise_id: e.exercise.id,
           name: e.exercise.name,
           primary_muscle: e.exercise.primary_muscle,
           equipment: e.exercise.equipment,
           is_compound: isMainCompound || isSecondary,
-          sets: e.sets,
+          sets: timeBased ? 1 : e.sets,
           target_reps: timeBased ? '0' : e.targetReps,
           target_weight: 0,
-          ...(timeBased ? { target_seconds: 60 } : {}),
+          ...(timeBased ? { target_seconds: 0 } : {}),
           rest_seconds: restSec,
         };
       });
@@ -203,37 +208,49 @@ export default function CustomWorkoutScreen() {
                 </Pressable>
               </View>
 
-              <View style={styles.setControls}>
-                <Text style={styles.setLabel}>Sets</Text>
-                <View style={styles.stepper}>
-                  <Pressable
-                    style={styles.stepperBtn}
-                    onPress={() => adjustSets(index, -1)}
-                  >
-                    <Text style={styles.stepperText}>−</Text>
-                  </Pressable>
-                  <Text style={styles.stepperValue}>{item.sets}</Text>
-                  <Pressable
-                    style={styles.stepperBtn}
-                    onPress={() => adjustSets(index, 1)}
-                  >
-                    <Text style={styles.stepperText}>+</Text>
-                  </Pressable>
+              {isDurationExercise(item.exercise) ? (
+                <View style={styles.durationModeCard}>
+                  <View style={styles.durationModeBadge}>
+                    <Text style={styles.durationModeBadgeText}>Duration only</Text>
+                  </View>
+                  <Text style={styles.durationModeTitle}>Single entry</Text>
+                  <Text style={styles.durationModeText}>
+                    This exercise logs one optional minutes and seconds entry when you record it.
+                  </Text>
                 </View>
+              ) : (
+                <View style={styles.setControls}>
+                  <Text style={styles.setLabel}>Sets</Text>
+                  <View style={styles.stepper}>
+                    <Pressable
+                      style={styles.stepperBtn}
+                      onPress={() => adjustSets(index, -1)}
+                    >
+                      <Text style={styles.stepperText}>−</Text>
+                    </Pressable>
+                    <Text style={styles.stepperValue}>{item.sets}</Text>
+                    <Pressable
+                      style={styles.stepperBtn}
+                      onPress={() => adjustSets(index, 1)}
+                    >
+                      <Text style={styles.stepperText}>+</Text>
+                    </Pressable>
+                  </View>
 
-                <Text style={styles.setLabel}>Reps</Text>
-                <TextInput
-                  style={styles.repsInput}
-                  value={item.targetReps}
-                  onChangeText={(t) =>
-                    setExercises((prev) =>
-                      prev.map((e, i) => (i === index ? { ...e, targetReps: t } : e)),
-                    )
-                  }
-                  keyboardType="default"
-                  placeholderTextColor={colors.text.tertiary}
-                />
-              </View>
+                  <Text style={styles.setLabel}>Reps</Text>
+                  <TextInput
+                    style={styles.repsInput}
+                    value={item.targetReps}
+                    onChangeText={(t) =>
+                      setExercises((prev) =>
+                        prev.map((e, i) => (i === index ? { ...e, targetReps: t } : e)),
+                      )
+                    }
+                    keyboardType="default"
+                    placeholderTextColor={colors.text.tertiary}
+                  />
+                </View>
+              )}
             </View>
           ))
         )}
@@ -474,6 +491,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     minWidth: 60,
     textAlign: 'center',
+  },
+  durationModeCard: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border.default,
+  },
+  durationModeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.accent.bg,
+    borderWidth: 1,
+    borderColor: colors.accent.border,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  durationModeBadgeText: {
+    color: colors.accent.primary,
+    fontSize: font.xs,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  durationModeTitle: {
+    fontSize: font.md,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: spacing.sm,
+  },
+  durationModeText: {
+    fontSize: font.sm,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+    lineHeight: 18,
   },
   footer: {
     paddingHorizontal: spacing.xl,
