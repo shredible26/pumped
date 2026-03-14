@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,8 @@ import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
 import { getLocalDateString } from '@/utils/date';
 import type { GeneratedWorkout, GeneratedExercise } from '@/services/ai';
 import { Exercise } from '@/types/exercise';
+import { buildExercisePickerSections } from '@/utils/exercisePicker';
+import { getDisplayWorkoutType, getWorkoutTypeForDate } from '@/utils/schedule';
 import {
   durationPartsToSeconds,
   isDurationExercise,
@@ -133,6 +135,35 @@ export default function WorkoutLogScreen() {
       setLoading(false);
     })();
   }, [session?.user?.id]);
+
+  const filteredExercises = useMemo(() => {
+    if (!searchQuery.trim()) return allExercises;
+
+    const q = searchQuery.toLowerCase();
+    return allExercises.filter((exercise) => exercise.name.toLowerCase().includes(q));
+  }, [allExercises, searchQuery]);
+
+  const pickerWorkoutType = useMemo(() => {
+    if (plan?.type) return plan.type;
+
+    const scheduledType = getWorkoutTypeForDate(
+      profile?.program_style,
+      new Date(),
+      profile?.training_frequency ?? 4,
+    );
+
+    return scheduledType === 'Rest'
+      ? 'Cardio'
+      : getDisplayWorkoutType(profile?.program_style, scheduledType);
+  }, [plan?.type, profile?.program_style, profile?.training_frequency]);
+
+  const exercisePickerSections = useMemo(
+    () =>
+      buildExercisePickerSections(filteredExercises, pickerWorkoutType, {
+        includeRecommended: !searchQuery.trim(),
+      }),
+    [filteredExercises, pickerWorkoutType, searchQuery]
+  );
 
   const addSet = (exIdx: number) => {
     setExercises((prev) =>
@@ -579,23 +610,25 @@ export default function WorkoutLogScreen() {
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingBottom: 24 }}
             >
-              {allExercises
-                .filter(
-                  (e) =>
-                    !searchQuery.trim() ||
-                    e.name.toLowerCase().includes(searchQuery.toLowerCase())
-                )
-                .slice(0, 50)
-                .map((ex) => (
-                  <Pressable
-                    key={ex.id}
-                    style={styles.searchItem}
-                    onPress={() => addExercise(ex)}
-                  >
-                    <Text style={styles.searchItemName}>{ex.name}</Text>
-                    <Text style={styles.searchItemMeta}>{ex.primary_muscle}</Text>
-                  </Pressable>
-                ))}
+              {exercisePickerSections.map((section) => (
+                <View key={section.key}>
+                  {section.kind === 'recommended' ? (
+                    <Text style={styles.recommendedLabel}>{section.title}</Text>
+                  ) : (
+                    <Text style={styles.groupLabel}>{section.title.toUpperCase()}</Text>
+                  )}
+                  {section.exercises.map((ex) => (
+                    <Pressable
+                      key={ex.id}
+                      style={styles.searchItem}
+                      onPress={() => addExercise(ex)}
+                    >
+                      <Text style={styles.searchItemName}>{ex.name}</Text>
+                      <Text style={styles.searchItemMeta}>{ex.primary_muscle}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ))}
             </ScrollView>
             <View
               style={[styles.searchFooter, { paddingBottom: Math.max(insets.bottom, 24) }]}
@@ -948,6 +981,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   searchTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text.primary },
+  groupLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.text.tertiary,
+    letterSpacing: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  recommendedLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.accent.primary,
+    letterSpacing: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
   searchItem: {
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,

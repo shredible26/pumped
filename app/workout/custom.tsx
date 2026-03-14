@@ -25,6 +25,8 @@ import { createSession } from '@/services/workouts';
 import { getLocalDateString } from '@/utils/date';
 import { Exercise } from '@/types/exercise';
 import { isDurationExercise } from '@/utils/exerciseUtils';
+import { buildExercisePickerSections } from '@/utils/exercisePicker';
+import { getDisplayWorkoutType, getWorkoutTypeForDate } from '@/utils/schedule';
 
 interface CustomExercise {
   exercise: Exercise;
@@ -36,6 +38,7 @@ export default function CustomWorkoutScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
   const startSession = useWorkoutStore((s) => s.startSession);
 
   const [name, setName] = useState('Custom Workout');
@@ -73,14 +76,20 @@ export default function CustomWorkoutScreen() {
   }, [searchQuery, allExercises]);
 
   const groupedExercises = useMemo(() => {
-    const groups: Record<string, Exercise[]> = {};
-    for (const ex of filteredExercises) {
-      const key = ex.primary_muscle;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(ex);
-    }
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [filteredExercises]);
+    const scheduledType = getWorkoutTypeForDate(
+      profile?.program_style,
+      new Date(),
+      profile?.training_frequency ?? 4,
+    );
+    const workoutType =
+      scheduledType === 'Rest'
+        ? 'Cardio'
+        : getDisplayWorkoutType(profile?.program_style, scheduledType);
+
+    return buildExercisePickerSections(filteredExercises, workoutType, {
+      includeRecommended: !searchQuery.trim(),
+    });
+  }, [filteredExercises, profile?.program_style, profile?.training_frequency, searchQuery]);
 
   const addExercise = (exercise: Exercise) => {
     const alreadyAdded = exercises.some(
@@ -303,12 +312,14 @@ export default function CustomWorkoutScreen() {
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingBottom: 24 }}
               >
-                {groupedExercises.map(([muscle, exList]) => (
-                  <View key={muscle}>
-                    <Text style={styles.groupLabel}>
-                      {muscle.replace('_', ' ').toUpperCase()}
-                    </Text>
-                    {exList.map((ex) => {
+                {groupedExercises.map((section) => (
+                  <View key={section.key}>
+                    {section.kind === 'recommended' ? (
+                      <Text style={styles.recommendedLabel}>{section.title}</Text>
+                    ) : (
+                      <Text style={styles.groupLabel}>{section.title.toUpperCase()}</Text>
+                    )}
+                    {section.exercises.map((ex) => {
                       const isAdded = exercises.some((e) => e.exercise.id === ex.id);
                       return (
                         <Pressable
@@ -640,6 +651,15 @@ const styles = StyleSheet.create({
     fontSize: font.xs,
     fontWeight: '700',
     color: colors.text.tertiary,
+    letterSpacing: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  recommendedLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.accent.primary,
     letterSpacing: 1,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,

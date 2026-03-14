@@ -24,11 +24,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { fetchExercises } from '@/services/exercises';
 import { createSession, insertSetLogs, completeSession } from '@/services/workouts';
 import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
-import { getLocalDateString } from '@/utils/date';
+import { getLocalDateString, parseLocalDate } from '@/utils/date';
 import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
 import { recalculateProfileMetrics } from '@/services/profileMetrics';
 import { Exercise } from '@/types/exercise';
 import { clearActiveWorkout } from '@/utils/storage';
+import { buildExercisePickerSections } from '@/utils/exercisePicker';
+import { getDisplayWorkoutType, getWorkoutTypeForDate } from '@/utils/schedule';
 import {
   durationPartsToSeconds,
   isDurationExercise,
@@ -111,15 +113,30 @@ export default function SpeedLogEditorScreen() {
     );
   }, [searchQuery, allExercises]);
 
-  const groupedExercises = useMemo(() => {
-    const groups: Record<string, Exercise[]> = {};
-    for (const ex of filteredExercises) {
-      const key = ex.primary_muscle;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(ex);
+  const pickerWorkoutType = useMemo(() => {
+    if (type && type.toLowerCase() !== 'custom') {
+      return type;
     }
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [filteredExercises]);
+
+    const targetDate = dateParam ? parseLocalDate(dateParam) : new Date();
+    const scheduledType = getWorkoutTypeForDate(
+      profile?.program_style,
+      targetDate,
+      profile?.training_frequency ?? 4,
+    );
+
+    return scheduledType === 'Rest'
+      ? 'Cardio'
+      : getDisplayWorkoutType(profile?.program_style, scheduledType);
+  }, [dateParam, profile?.program_style, profile?.training_frequency, type]);
+
+  const groupedExercises = useMemo(
+    () =>
+      buildExercisePickerSections(filteredExercises, pickerWorkoutType, {
+        includeRecommended: !searchQuery.trim(),
+      }),
+    [filteredExercises, pickerWorkoutType, searchQuery]
+  );
 
   const addExercise = (exercise: Exercise) => {
     if (exercises.some((e) => e.exercise.id === exercise.id)) return;
@@ -561,12 +578,14 @@ export default function SpeedLogEditorScreen() {
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingBottom: 24 }}
               >
-                {groupedExercises.map(([muscle, exList]) => (
-                  <View key={muscle}>
-                    <Text style={styles.groupLabel}>
-                      {muscle.replace('_', ' ').toUpperCase()}
-                    </Text>
-                    {exList.map((ex) => {
+                {groupedExercises.map((section) => (
+                  <View key={section.key}>
+                    {section.kind === 'recommended' ? (
+                      <Text style={styles.recommendedLabel}>{section.title}</Text>
+                    ) : (
+                      <Text style={styles.groupLabel}>{section.title.toUpperCase()}</Text>
+                    )}
+                    {section.exercises.map((ex) => {
                       return (
                         <Pressable
                           key={ex.id}
@@ -922,6 +941,15 @@ const styles = StyleSheet.create({
     fontSize: font.xs,
     fontWeight: '700',
     color: colors.text.tertiary,
+    letterSpacing: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  recommendedLabel: {
+    fontSize: font.xs,
+    fontWeight: '700',
+    color: colors.accent.primary,
     letterSpacing: 1,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,
