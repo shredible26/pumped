@@ -1,6 +1,10 @@
 import { supabase } from './supabase';
 import { e1rm } from '@/utils/epley';
 import { format } from 'date-fns';
+import {
+  fetchAllPaginatedRows,
+  fetchAllPaginatedRowsForValues,
+} from '@/utils/supabasePagination';
 
 export type Big3Lift = 'squat' | 'bench' | 'deadlift';
 
@@ -41,13 +45,20 @@ export async function getBig3(userId: string): Promise<Big3Result> {
   const profileBench = profile?.bench_e1rm != null ? Number(profile.bench_e1rm) : 0;
   const profileDeadlift = profile?.deadlift_e1rm != null ? Number(profile.deadlift_e1rm) : 0;
 
-  const { data: exercises } = await supabase
-    .from('exercises')
-    .select('id, big_three_type')
-    .or('big_three_type.eq.squat,big_three_type.eq.bench,big_three_type.eq.deadlift');
+  const exercises = await fetchAllPaginatedRows<{
+    id: string;
+    big_three_type: Big3Lift | null;
+  }>((from, to) =>
+    supabase
+      .from('exercises')
+      .select('id, big_three_type')
+      .or('big_three_type.eq.squat,big_three_type.eq.bench,big_three_type.eq.deadlift')
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
   const typeToIds = new Map<Big3Lift, string[]>();
-  for (const e of exercises || []) {
-    const t = (e as any).big_three_type as Big3Lift;
+  for (const e of exercises) {
+    const t = e.big_three_type as Big3Lift;
     if (t) {
       const arr = typeToIds.get(t) ?? [];
       arr.push(e.id);
@@ -55,12 +66,17 @@ export async function getBig3(userId: string): Promise<Big3Result> {
     }
   }
 
-  const { data: sessions } = await supabase
-    .from('workout_sessions')
-    .select('id, date')
-    .eq('user_id', userId)
-    .eq('completed', true)
-    .or('is_rest_day.is.null,is_rest_day.eq.false');
+  const sessions = await fetchAllPaginatedRows<{ id: string; date?: string }>((from, to) =>
+    supabase
+      .from('workout_sessions')
+      .select('id, date')
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .order('date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
   if (!sessions || sessions.length === 0) {
     for (const lift of ['squat', 'bench', 'deadlift'] as Big3Lift[]) {
@@ -83,14 +99,24 @@ export async function getBig3(userId: string): Promise<Big3Result> {
   if (sessions.length > 0) {
     const sessionIds = sessions.map((s) => s.id);
     const sessionDates = new Map(
-      (sessions as { id: string; date?: string }[]).map((s) => [s.id, s.date || ''])
+      sessions.map((s) => [s.id, s.date || ''])
     );
-    const { data: sets } = await supabase
-      .from('set_logs')
-      .select('session_id, exercise_id, actual_weight, actual_reps, created_at')
-      .in('session_id', sessionIds)
-      .not('actual_weight', 'is', null)
-      .not('actual_reps', 'is', null);
+    const sets = await fetchAllPaginatedRowsForValues<{
+      session_id: string;
+      exercise_id: string | null;
+      actual_weight: number | null;
+      actual_reps: number | null;
+      created_at: string | null;
+    }, string>(sessionIds, (chunk, from, to) =>
+      supabase
+        .from('set_logs')
+        .select('id, session_id, exercise_id, actual_weight, actual_reps, created_at')
+        .in('session_id', chunk)
+        .not('actual_weight', 'is', null)
+        .not('actual_reps', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+    );
 
     for (const lift of ['squat', 'bench', 'deadlift'] as Big3Lift[]) {
       const ids = typeToIds.get(lift) ?? [];
@@ -99,16 +125,16 @@ export async function getBig3(userId: string): Promise<Big3Result> {
       let bestSource = '';
       let bestDate = '';
 
-      for (const set of sets || []) {
-        const s = set as any;
-        if (!ids.includes(s.exercise_id)) continue;
-        const w = Number(s.actual_weight) || 0;
-        const r = Number(s.actual_reps) || 0;
+      for (const set of sets) {
+        if (!set.exercise_id || !ids.includes(set.exercise_id)) continue;
+        const w = Number(set.actual_weight) || 0;
+        const r = Number(set.actual_reps) || 0;
         if (w <= 0 || r <= 0) continue;
         const est = e1rm(w, r);
         if (est > maxE1) {
           maxE1 = est;
-          const date = sessionDates.get(s.session_id) || s.created_at?.split('T')[0] || '';
+          const date =
+            sessionDates.get(set.session_id) || set.created_at?.split('T')[0] || '';
           bestSource = `Based on ${w} × ${r}`;
           bestDate = date;
         }

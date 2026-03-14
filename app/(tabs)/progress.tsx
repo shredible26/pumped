@@ -59,6 +59,11 @@ const MUSCLE_LABELS: Record<string, string> = {
   calves: 'Calves',
 };
 
+interface ProgressFetchOptions {
+  preserveStrengthSelection?: boolean;
+  showStrengthLoader?: boolean;
+}
+
 export default function ProgressScreen() {
   const session = useAuthStore((s) => s.session);
   const insets = useSafeAreaInsets();
@@ -84,93 +89,146 @@ export default function ProgressScreen() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggestionsRefreshing, setSuggestionsRefreshing] = useState(false);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
-  const [weeklyVolumeTotal, setWeeklyVolumeTotal] = useState(0);
+  const [totalVolume, setTotalVolume] = useState(0);
   const streak = profile?.current_streak_days ?? 0;
   const selectedStrengthTrendExerciseIdRef = useRef<string | null>(null);
   const fetchDataRef = useRef<
-    ((options?: { preserveStrengthSelection?: boolean }) => Promise<void>) | null
+    ((options?: ProgressFetchOptions) => Promise<void>) | null
   >(null);
   const hasLoadedProgressRef = useRef(false);
-  const hasHydratedFilterFetchRef = useRef(false);
+  const hasHydratedVolumeFilterFetchRef = useRef(false);
+  const hasHydratedDistributionFilterFetchRef = useRef(false);
   const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const strengthTrendRequestIdRef = useRef(0);
+  const volumeRequestIdRef = useRef(0);
+  const distributionRequestIdRef = useRef(0);
 
-  const loadStrengthTrendData = useCallback(async (userId: string, exerciseId: string | null) => {
+  const loadStrengthTrendData = useCallback(async (
+    userId: string,
+    exerciseId: string | null,
+    options?: { showLoader?: boolean },
+  ) => {
+    const requestId = ++strengthTrendRequestIdRef.current;
     if (!exerciseId) {
-      setStrengthTrendData(null);
-      setStrengthTrendLoading(false);
+      if (strengthTrendRequestIdRef.current === requestId) {
+        setStrengthTrendData(null);
+        setStrengthTrendLoading(false);
+      }
       return;
     }
 
-    setStrengthTrendLoading(true);
+    if (options?.showLoader ?? true) {
+      setStrengthTrendLoading(true);
+    }
     try {
       const data = await getStrengthTrendData(userId, exerciseId);
+      if (strengthTrendRequestIdRef.current !== requestId) return;
       setStrengthTrendData(data);
     } catch (error) {
+      if (strengthTrendRequestIdRef.current !== requestId) return;
       console.warn('Strength trend fetch error', error);
       setStrengthTrendData(null);
     } finally {
-      setStrengthTrendLoading(false);
+      if (strengthTrendRequestIdRef.current === requestId) {
+        setStrengthTrendLoading(false);
+      }
     }
   }, []);
 
   const resetStrengthTrendSelection = useCallback(() => {
     selectedStrengthTrendExerciseIdRef.current = null;
+    strengthTrendRequestIdRef.current += 1;
     setSelectedStrengthTrendExerciseId(null);
     setStrengthTrendData(null);
+    setStrengthTrendLoading(false);
     setStrengthTrendPickerOpen(false);
     setStrengthTrendSearchQuery('');
   }, []);
 
-  const fetchData = useCallback(async (options?: { preserveStrengthSelection?: boolean }) => {
-    if (!session?.user?.id) return;
-    const userId = session.user.id;
+  const loadVolumeData = useCallback(async (
+    userId: string,
+    period: 'week' | 'month' | 'year',
+  ) => {
+    const requestId = ++volumeRequestIdRef.current;
+    try {
+      const data = await getVolumeChartData(userId, period);
+      if (volumeRequestIdRef.current !== requestId) return;
+      setVolumeData(data);
+    } catch (error) {
+      if (volumeRequestIdRef.current !== requestId) return;
+      console.warn('Volume chart fetch error', error);
+    }
+  }, []);
+
+  const loadDistributionData = useCallback(async (
+    userId: string,
+    period: 'week' | 'month' | 'all',
+  ) => {
+    const requestId = ++distributionRequestIdRef.current;
+    try {
+      const data = await calculateMuscleDistribution(userId, period);
+      if (distributionRequestIdRef.current !== requestId) return;
+      setMuscleDistribution(data);
+    } catch (error) {
+      if (distributionRequestIdRef.current !== requestId) return;
+      console.warn('Muscle distribution fetch error', error);
+    }
+  }, []);
+
+  const loadOverviewData = useCallback(async (
+    userId: string,
+    options?: ProgressFetchOptions,
+  ) => {
     const preserveStrengthSelection = options?.preserveStrengthSelection ?? true;
+    const previousSelectedStrengthTrendExerciseId = selectedStrengthTrendExerciseIdRef.current;
 
     if (!preserveStrengthSelection) {
       selectedStrengthTrendExerciseIdRef.current = null;
+      strengthTrendRequestIdRef.current += 1;
       setSelectedStrengthTrendExerciseId(null);
       setStrengthTrendData(null);
+      setStrengthTrendLoading(false);
     }
 
-    setStrengthTrendLoading(true);
+    const shouldShowStrengthLoader =
+      options?.showStrengthLoader ??
+      (!preserveStrengthSelection ||
+        (!previousSelectedStrengthTrendExerciseId && strengthTrendOptions.length === 0) ||
+        (previousSelectedStrengthTrendExerciseId != null && strengthTrendData == null));
+
+    if (shouldShowStrengthLoader) {
+      setStrengthTrendLoading(true);
+    }
+
     try {
-      const [
-        narrativesRes,
-        big3Res,
-        distRes,
-        volRes,
-        strengthTrendOptionsRes,
-        dashboardStatsRes,
-      ] = await Promise.all([
+      const [narrativesRes, big3Res, strengthTrendOptionsRes, dashboardStatsRes] = await Promise.all([
         getProgressNarratives(userId),
         getBig3(userId),
-        calculateMuscleDistribution(userId, distributionPeriod),
-        getVolumeChartData(userId, volumePeriod),
         getStrengthTrendExerciseOptions(userId),
         fetchDashboardStats(userId),
       ]);
       setInsights(narrativesRes.insights);
       setBig3(big3Res);
-      setMuscleDistribution(distRes);
-      setVolumeData(volRes);
       setSuggestions(narrativesRes.suggestions);
       setStrengthTrendOptions(strengthTrendOptionsRes);
       setTotalWorkouts(dashboardStatsRes.workoutCount);
-      setWeeklyVolumeTotal(dashboardStatsRes.weeklyVolumeTotal);
+      setTotalVolume(dashboardStatsRes.volumeTotal);
 
       const resolvedStrengthTrendExerciseId =
         preserveStrengthSelection &&
-        selectedStrengthTrendExerciseIdRef.current &&
+        previousSelectedStrengthTrendExerciseId &&
         strengthTrendOptionsRes.some(
-          (option) => option.exerciseId === selectedStrengthTrendExerciseIdRef.current,
+          (option) => option.exerciseId === previousSelectedStrengthTrendExerciseId,
         )
-          ? selectedStrengthTrendExerciseIdRef.current
+          ? previousSelectedStrengthTrendExerciseId
           : null;
 
       selectedStrengthTrendExerciseIdRef.current = resolvedStrengthTrendExerciseId;
       setSelectedStrengthTrendExerciseId(resolvedStrengthTrendExerciseId);
       if (resolvedStrengthTrendExerciseId) {
-        await loadStrengthTrendData(userId, resolvedStrengthTrendExerciseId);
+        await loadStrengthTrendData(userId, resolvedStrengthTrendExerciseId, {
+          showLoader: shouldShowStrengthLoader,
+        });
       } else {
         setStrengthTrendData(null);
         setStrengthTrendLoading(false);
@@ -179,7 +237,25 @@ export default function ProgressScreen() {
       console.warn('Progress fetch error', e);
       setStrengthTrendLoading(false);
     }
-  }, [session?.user?.id, distributionPeriod, volumePeriod, loadStrengthTrendData]);
+  }, [loadStrengthTrendData, strengthTrendData, strengthTrendOptions.length]);
+
+  const fetchData = useCallback(async (options?: ProgressFetchOptions) => {
+    if (!session?.user?.id) return;
+    const userId = session.user.id;
+
+    await Promise.all([
+      loadOverviewData(userId, options),
+      loadDistributionData(userId, distributionPeriod),
+      loadVolumeData(userId, volumePeriod),
+    ]);
+  }, [
+    distributionPeriod,
+    loadDistributionData,
+    loadOverviewData,
+    loadVolumeData,
+    session?.user?.id,
+    volumePeriod,
+  ]);
 
   useEffect(() => {
     fetchDataRef.current = fetchData;
@@ -187,7 +263,8 @@ export default function ProgressScreen() {
 
   useEffect(() => {
     hasLoadedProgressRef.current = false;
-    hasHydratedFilterFetchRef.current = false;
+    hasHydratedVolumeFilterFetchRef.current = false;
+    hasHydratedDistributionFilterFetchRef.current = false;
   }, [session?.user?.id]);
 
   useFocusEffect(
@@ -197,22 +274,37 @@ export default function ProgressScreen() {
       if (!hasLoadedProgressRef.current) {
         resetStrengthTrendSelection();
         hasLoadedProgressRef.current = true;
-        void fetchDataRef.current?.({ preserveStrengthSelection: false });
+        void fetchDataRef.current?.({
+          preserveStrengthSelection: false,
+          showStrengthLoader: true,
+        });
         return;
       }
 
-      void fetchDataRef.current?.({ preserveStrengthSelection: true });
+      void fetchDataRef.current?.({
+        preserveStrengthSelection: true,
+        showStrengthLoader: false,
+      });
     }, [session?.user?.id, resetStrengthTrendSelection]),
   );
 
   useEffect(() => {
     if (!hasLoadedProgressRef.current || !session?.user?.id) return;
-    if (!hasHydratedFilterFetchRef.current) {
-      hasHydratedFilterFetchRef.current = true;
+    if (!hasHydratedDistributionFilterFetchRef.current) {
+      hasHydratedDistributionFilterFetchRef.current = true;
       return;
     }
-    void fetchData({ preserveStrengthSelection: true });
-  }, [distributionPeriod, volumePeriod, session?.user?.id, fetchData]);
+    void loadDistributionData(session.user.id, distributionPeriod);
+  }, [distributionPeriod, loadDistributionData, session?.user?.id]);
+
+  useEffect(() => {
+    if (!hasLoadedProgressRef.current || !session?.user?.id) return;
+    if (!hasHydratedVolumeFilterFetchRef.current) {
+      hasHydratedVolumeFilterFetchRef.current = true;
+      return;
+    }
+    void loadVolumeData(session.user.id, volumePeriod);
+  }, [loadVolumeData, session?.user?.id, volumePeriod]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -224,7 +316,10 @@ export default function ProgressScreen() {
         clearTimeout(autoRefreshTimeoutRef.current);
       }
       autoRefreshTimeoutRef.current = setTimeout(() => {
-        void fetchDataRef.current?.({ preserveStrengthSelection: true });
+        void fetchDataRef.current?.({
+          preserveStrengthSelection: true,
+          showStrengthLoader: false,
+        });
       }, 250);
     };
 
@@ -273,7 +368,10 @@ export default function ProgressScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchData({ preserveStrengthSelection: true });
+    await fetchData({
+      preserveStrengthSelection: true,
+      showStrengthLoader: false,
+    });
     setRefreshing(false);
   }, [fetchData]);
 
@@ -372,7 +470,7 @@ export default function ProgressScreen() {
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>
-              {formatVolumeWithUnit(weeklyVolumeTotal, units).replace(` ${units}`, '')}
+              {formatVolumeWithUnit(totalVolume, units).replace(` ${units}`, '')}
             </Text>
             <Text style={styles.statLabel}>
               {units === 'lbs' ? 'Lbs total' : 'Kg total'}

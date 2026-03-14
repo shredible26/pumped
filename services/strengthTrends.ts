@@ -1,5 +1,9 @@
 import { supabase } from './supabase';
 import { e1rm } from '@/utils/epley';
+import {
+  fetchAllPaginatedRows,
+  fetchAllPaginatedRowsForValues,
+} from '@/utils/supabasePagination';
 
 interface CompletedSession {
   id: string;
@@ -68,28 +72,34 @@ function isEligibleWeightedExercise(exercise: ExerciseMeta | undefined): boolean
 }
 
 async function getCompletedSessions(userId: string): Promise<CompletedSession[]> {
-  const { data, error } = await supabase
-    .from('workout_sessions')
-    .select('id, name, date, completed_at')
-    .eq('user_id', userId)
-    .eq('completed', true)
-    .or('is_rest_day.is.null,is_rest_day.eq.false')
-    .order('completed_at', { ascending: true });
-
-  if (error) throw error;
-  return (data ?? []) as CompletedSession[];
+  return fetchAllPaginatedRows<CompletedSession>((from, to) =>
+    supabase
+      .from('workout_sessions')
+      .select('id, name, date, completed_at')
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .order('completed_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 }
 
 async function getExerciseMeta(exerciseIds: string[]): Promise<Map<string, ExerciseMeta>> {
   if (exerciseIds.length === 0) return new Map();
 
-  const { data, error } = await supabase
-    .from('exercises')
-    .select('id, name, equipment, movement_pattern')
-    .in('id', exerciseIds);
+  const exercises = await fetchAllPaginatedRowsForValues<ExerciseMeta, string>(
+    exerciseIds,
+    (chunk, from, to) =>
+      supabase
+        .from('exercises')
+        .select('id, name, equipment, movement_pattern')
+        .in('id', chunk)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
 
-  if (error) throw error;
-  return new Map(((data ?? []) as ExerciseMeta[]).map((exercise) => [exercise.id, exercise]));
+  return new Map(exercises.map((exercise) => [exercise.id, exercise]));
 }
 
 async function getStrengthTrendPeerComparison(
@@ -125,16 +135,26 @@ export async function getStrengthTrendExerciseOptions(
   const sessionIds = sessions.map((session) => session.id);
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
 
-  const { data: setLogs, error: setError } = await supabase
-    .from('set_logs')
-    .select('session_id, exercise_id, actual_weight')
-    .in('session_id', sessionIds)
-    .gt('actual_weight', 0);
-
-  if (setError) throw setError;
+  const setLogs = await fetchAllPaginatedRowsForValues<{
+    session_id: string;
+    exercise_id: string | null;
+    actual_weight: number | null;
+  }, string>(sessionIds, (chunk, from, to) =>
+    supabase
+      .from('set_logs')
+      .select('id, session_id, exercise_id, actual_weight')
+      .in('session_id', chunk)
+      .gt('actual_weight', 0)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
   const exerciseIds = [
-    ...new Set((setLogs ?? []).map((set: any) => set.exercise_id).filter(Boolean)),
+    ...new Set(
+      setLogs
+        .map((set) => set.exercise_id)
+        .filter((exerciseId): exerciseId is string => Boolean(exerciseId)),
+    ),
   ];
   const exerciseMap = await getExerciseMeta(exerciseIds);
 
@@ -149,8 +169,8 @@ export async function getStrengthTrendExerciseOptions(
     }
   >();
 
-  for (const rawSet of setLogs ?? []) {
-    const set = rawSet as { session_id: string; exercise_id: string; actual_weight: number | null };
+  for (const set of setLogs) {
+    if (!set.exercise_id) continue;
     const exercise = exerciseMap.get(set.exercise_id);
     const session = sessionById.get(set.session_id);
 
@@ -219,15 +239,22 @@ export async function getStrengthTrendData(
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const sessionIds = sessions.map((session) => session.id);
 
-  const { data: setLogs, error: setError } = await supabase
-    .from('set_logs')
-    .select('session_id, actual_weight, actual_reps')
-    .eq('exercise_id', exerciseId)
-    .in('session_id', sessionIds)
-    .gt('actual_weight', 0)
-    .order('set_number', { ascending: true });
-
-  if (setError) throw setError;
+  const setLogs = await fetchAllPaginatedRowsForValues<{
+    session_id: string;
+    actual_weight: number | null;
+    actual_reps: number | null;
+  }, string>(sessionIds, (chunk, from, to) =>
+    supabase
+      .from('set_logs')
+      .select('id, session_id, actual_weight, actual_reps')
+      .eq('exercise_id', exerciseId)
+      .in('session_id', chunk)
+      .gt('actual_weight', 0)
+      .order('session_id', { ascending: true })
+      .order('set_number', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
   const peerComparisonPromise = getStrengthTrendPeerComparison(exerciseId);
 
@@ -236,12 +263,7 @@ export async function getStrengthTrendData(
     Array<{ weight: number; reps: number | null }>
   >();
 
-  for (const rawSet of setLogs ?? []) {
-    const set = rawSet as {
-      session_id: string;
-      actual_weight: number | null;
-      actual_reps: number | null;
-    };
+  for (const set of setLogs) {
     const weight = Number(set.actual_weight) || 0;
     if (weight <= 0) continue;
 

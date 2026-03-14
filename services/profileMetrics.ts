@@ -2,6 +2,10 @@ import { differenceInCalendarDays } from 'date-fns';
 import { supabase } from './supabase';
 import { e1rm } from '@/utils/epley';
 import { getLocalDateString, parseLocalDate } from '@/utils/date';
+import {
+  fetchAllPaginatedRows,
+  fetchAllPaginatedRowsForValues,
+} from '@/utils/supabasePagination';
 
 interface SessionRow {
   id: string;
@@ -93,7 +97,8 @@ async function calculateLoggedBigThree(sessionIds: string[]): Promise<Record<Big
   const { data: exercises } = await supabase
     .from('exercises')
     .select('id, big_three_type')
-    .or('big_three_type.eq.squat,big_three_type.eq.bench,big_three_type.eq.deadlift');
+    .or('big_three_type.eq.squat,big_three_type.eq.bench,big_three_type.eq.deadlift')
+    .order('id', { ascending: true });
 
   const liftIds = new Map<Big3Lift, Set<string>>([
     ['squat', new Set<string>()],
@@ -107,12 +112,20 @@ async function calculateLoggedBigThree(sessionIds: string[]): Promise<Record<Big
     liftIds.get(lift)?.add(exercise.id);
   }
 
-  const { data: setLogs } = await supabase
-    .from('set_logs')
-    .select('exercise_id, actual_weight, actual_reps')
-    .in('session_id', sessionIds)
-    .not('actual_weight', 'is', null)
-    .not('actual_reps', 'is', null);
+  const setLogs = await fetchAllPaginatedRowsForValues<{
+    exercise_id: string | null;
+    actual_weight: number | null;
+    actual_reps: number | null;
+  }, string>(sessionIds, (chunk, from, to) =>
+    supabase
+      .from('set_logs')
+      .select('id, exercise_id, actual_weight, actual_reps')
+      .in('session_id', chunk)
+      .not('actual_weight', 'is', null)
+      .not('actual_reps', 'is', null)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
   const best: Record<Big3Lift, number> = {
     squat: 0,
@@ -120,7 +133,7 @@ async function calculateLoggedBigThree(sessionIds: string[]): Promise<Record<Big
     deadlift: 0,
   };
 
-  for (const setLog of setLogs ?? []) {
+  for (const setLog of setLogs) {
     const exerciseId = setLog.exercise_id as string | null;
     if (!exerciseId) continue;
 
@@ -144,14 +157,7 @@ export async function recalculateProfileMetrics(
   userId: string,
   options?: RecalculateProfileMetricsOptions,
 ) {
-  const [{ data: sessions, error }, { data: profile, error: profileError }] = await Promise.all([
-    supabase
-      .from('workout_sessions')
-      .select('id, date')
-      .eq('user_id', userId)
-      .eq('completed', true)
-      .or('is_rest_day.is.null,is_rest_day.eq.false')
-      .order('date', { ascending: true }),
+  const [{ data: profile, error: profileError }, sessions] = await Promise.all([
     supabase
       .from('profiles')
       .select(
@@ -159,12 +165,22 @@ export async function recalculateProfileMetrics(
       )
       .eq('id', userId)
       .single(),
+    fetchAllPaginatedRows<SessionRow>((from, to) =>
+      supabase
+        .from('workout_sessions')
+        .select('id, date')
+        .eq('user_id', userId)
+        .eq('completed', true)
+        .or('is_rest_day.is.null,is_rest_day.eq.false')
+        .order('date', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
-  if (error) throw error;
   if (profileError) throw profileError;
 
-  const sessionRows = (sessions ?? []) as SessionRow[];
+  const sessionRows = sessions;
   const streaks = calculateStreaks(sessionRows.map((session) => session.date));
   const loggedBigThree = await calculateLoggedBigThree(sessionRows.map((session) => session.id));
   const preserveExistingBigThree = options?.preserveExistingBigThree ?? false;

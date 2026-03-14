@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   format,
   startOfWeek,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
   startOfDay,
   addDays,
   isSameDay,
@@ -69,10 +72,14 @@ export default function TodayScreen() {
   const [restDaysThisWeek, setRestDaysThisWeek] = useState<string[]>([]);
   /** Dates (yyyy-MM-dd) this week where user logged a workout, rest day, or cardio */
   const [activityDaysThisWeek, setActivityDaysThisWeek] = useState<string[]>([]);
+  const [activityDaysInSelectedMonth, setActivityDaysInSelectedMonth] = useState<string[]>([]);
   const [cachedPlan, setCachedPlan] = useState<GeneratedWorkout | null>(null);
   const [sessionsForSelectedDate, setSessionsForSelectedDate] = useState<SessionForDate[]>([]);
   const [historicalFatigueMap, setHistoricalFatigueMap] = useState<Array<{ muscle_group: string; recovery_pct: number | null; last_trained_at: string | null }>>([]);
   const [totalWorkouts, setTotalWorkouts] = useState(0);
+  const calendarStripRef = useRef<ScrollView | null>(null);
+  const calendarDayPositionsRef = useRef<Record<string, number>>({});
+  const lastScrolledMonthKeyRef = useRef<string | null>(null);
 
   const fetchProfile = useCallback(async () => {
     if (!session?.user?.id) return;
@@ -122,6 +129,26 @@ export default function TodayScreen() {
     ]);
     setActivityDaysThisWeek([...allActivityDates]);
   }, [session?.user?.id]);
+
+  const fetchMonthActivityDays = useCallback(
+    async (date: Date) => {
+      if (!session?.user?.id) return;
+      const from = format(startOfMonth(date), 'yyyy-MM-dd');
+      const to = format(endOfMonth(date), 'yyyy-MM-dd');
+      const { data, error } = await supabase
+        .from('workout_sessions')
+        .select('date')
+        .eq('user_id', session.user.id)
+        .or('completed.eq.true,is_rest_day.eq.true')
+        .gte('date', from)
+        .lte('date', to);
+
+      if (error) return;
+
+      setActivityDaysInSelectedMonth([...new Set((data ?? []).map((row: { date: string }) => row.date))]);
+    },
+    [session?.user?.id]
+  );
 
   const fetchCachedPlan = useCallback(async () => {
     if (!session?.user?.id) {
@@ -205,16 +232,49 @@ export default function TodayScreen() {
     fetchSessionsForDate(selectedDate);
   }, [selectedDate, fetchSessionsForDate]);
 
+  const selectedMonthKey = format(selectedDate, 'yyyy-MM');
+  const monthDays = eachDayOfInterval({
+    start: startOfMonth(selectedDate),
+    end: endOfMonth(selectedDate),
+  });
+
+  const scrollCalendarToSelectedDay = useCallback(() => {
+    const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
+    const selectedDayX = calendarDayPositionsRef.current[selectedDateKey];
+    if (selectedDayX == null) return;
+
+    const scrollOffset = Math.max(0, selectedDayX - spacing.xl);
+    calendarStripRef.current?.scrollTo({ x: scrollOffset, animated: false });
+  }, [selectedDate]);
+
+  useEffect(() => {
+    void fetchMonthActivityDays(selectedDate);
+  }, [fetchMonthActivityDays, selectedMonthKey, selectedDate]);
+
+  useEffect(() => {
+    calendarDayPositionsRef.current = {};
+    lastScrolledMonthKeyRef.current = null;
+
+    const timeout = setTimeout(() => {
+      if (lastScrolledMonthKeyRef.current === selectedMonthKey) return;
+      scrollCalendarToSelectedDay();
+      lastScrolledMonthKeyRef.current = selectedMonthKey;
+    }, 0);
+
+    return () => clearTimeout(timeout);
+  }, [scrollCalendarToSelectedDay, selectedMonthKey]);
+
   useFocusEffect(
     useCallback(() => {
       fetchSessionsForDate(selectedDate);
       fetchWeekWorkouts();
+      fetchMonthActivityDays(selectedDate);
       refreshFatigue();
       fetchCachedPlan();
       if (session?.user?.id && !isSameDay(selectedDate, new Date()) && !isAfter(startOfDay(selectedDate), startOfDay(new Date()))) {
         getHistoricalFatigueMap(session.user.id, selectedDate).then(setHistoricalFatigueMap);
       }
-    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, refreshFatigue, fetchCachedPlan, session?.user?.id])
+    }, [selectedDate, fetchSessionsForDate, fetchWeekWorkouts, fetchMonthActivityDays, refreshFatigue, fetchCachedPlan, session?.user?.id])
   );
 
   useEffect(() => {
@@ -236,7 +296,7 @@ export default function TodayScreen() {
     setRefreshing(true);
     try {
       await Promise.race([
-        loadData(),
+        Promise.all([loadData(), fetchMonthActivityDays(selectedDate)]).then(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, REFRESH_TIMEOUT_MS)),
       ]);
     } catch {
@@ -244,7 +304,7 @@ export default function TodayScreen() {
     } finally {
       setRefreshing(false);
     }
-  }, [loadData, session?.user?.id]);
+  }, [fetchMonthActivityDays, loadData, selectedDate, session?.user?.id]);
 
   const handleSelectMuscle = useCallback((muscle: string) => {
     setSelectedMuscle(muscle);
@@ -265,9 +325,6 @@ export default function TodayScreen() {
     ? PROGRAM_LABELS[profile.program_style] ?? ''
     : '';
 
-  const weekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-
   const weekWorkoutCount = workoutDaysThisWeek.length;
   const isSelectedToday = isSameDay(selectedDate, new Date());
   const isSelectedFuture = isAfter(startOfDay(selectedDate), startOfDay(new Date()));
@@ -284,20 +341,35 @@ export default function TodayScreen() {
           />
         }
       >
-        {/* Weekly Calendar Strip — tappable for all days (today, past, future) */}
-        <View style={styles.calendarStrip}>
-          {weekDays.map((day) => {
+        {/* Monthly Calendar Strip — tappable for all days in the selected month */}
+        <ScrollView
+          ref={calendarStripRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.calendarStrip}
+          contentContainerStyle={styles.calendarStripContent}
+          onContentSizeChange={() => {
+            if (lastScrolledMonthKeyRef.current === selectedMonthKey) return;
+            scrollCalendarToSelectedDay();
+            lastScrolledMonthKeyRef.current = selectedMonthKey;
+          }}
+        >
+          {monthDays.map((day, index) => {
             const today = isToday(day);
             const selected = isSameDay(day, selectedDate);
             const dateStr = format(day, 'yyyy-MM-dd');
             const isFutureDay = isAfter(startOfDay(day), startOfDay(new Date()));
-            const hasActivity = activityDaysThisWeek.includes(dateStr);
+            const hasActivity = activityDaysInSelectedMonth.includes(dateStr);
             return (
               <Pressable
                 key={day.toISOString()}
                 onPress={() => setSelectedDate(day)}
+                onLayout={(event) => {
+                  calendarDayPositionsRef.current[dateStr] = event.nativeEvent.layout.x;
+                }}
                 style={[
                   styles.calendarDay,
+                  index < monthDays.length - 1 && styles.calendarDaySpaced,
                   today && styles.calendarDayToday,
                   selected && styles.calendarDaySelected,
                 ]}
@@ -322,7 +394,7 @@ export default function TodayScreen() {
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
 
         {/* Welcome Message */}
         <View style={styles.welcomeSection}>
@@ -700,8 +772,9 @@ const styles = StyleSheet.create({
   },
 
   calendarStrip: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    maxHeight: 72,
+  },
+  calendarStripContent: {
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
   },
@@ -711,6 +784,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     borderRadius: radius.md,
     minWidth: 42,
+  },
+  calendarDaySpaced: {
+    marginRight: spacing.xs,
   },
   calendarDayToday: {
     borderWidth: 1,

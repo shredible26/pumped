@@ -10,6 +10,10 @@ import {
 import type { EquipmentAccess, ExperienceLevel, ProgramStyle } from '@/types/user';
 import { supabase } from './supabase';
 import { fetchFatigueMap } from './fatigue';
+import {
+  fetchAllPaginatedRows,
+  fetchAllPaginatedRowsForValues,
+} from '@/utils/supabasePagination';
 
 export interface Insight {
   icon: string;
@@ -524,7 +528,7 @@ async function buildProgressSnapshot(userId: string): Promise<ProgressSnapshot> 
   const currentWeekStartStr = format(currentWeekStart, 'yyyy-MM-dd');
   const currentWeekEndStr = format(currentWeekEnd, 'yyyy-MM-dd');
 
-  const [{ data: profile }, { data: sessions }, fatigueMap] = await Promise.all([
+  const [{ data: profile }, sessions, fatigueMap] = await Promise.all([
     supabase
       .from('profiles')
       .select(
@@ -532,20 +536,24 @@ async function buildProgressSnapshot(userId: string): Promise<ProgressSnapshot> 
       )
       .eq('id', userId)
       .single(),
-    supabase
-      .from('workout_sessions')
+    fetchAllPaginatedRows<WorkoutSessionRow>((from, to) =>
+      supabase
+        .from('workout_sessions')
       .select('id, date, name, total_volume, is_rest_day, is_cardio')
       .eq('user_id', userId)
       .eq('completed', true)
       .gte('date', previousMonthStartStr)
       .lte('date', monthEndStr)
-      .order('date', { ascending: false }),
+      .order('date', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    ),
     fetchFatigueMap(userId).catch(() => []),
   ]);
 
   const targetDays = Number(profile?.training_frequency ?? 4);
   const streak = Number(profile?.current_streak_days ?? 0);
-  const sessionRows = (sessions ?? []) as WorkoutSessionRow[];
+  const sessionRows = sessions;
   const workoutRows = sessionRows.filter((session) => !session.is_rest_day);
   const monthWorkouts = workoutRows.filter(
     (session) => session.date >= monthStartStr && session.date <= monthEndStr,
@@ -575,32 +583,44 @@ async function buildProgressSnapshot(userId: string): Promise<ProgressSnapshot> 
   let pullVolume = 0;
 
   if (allSessionIds.length > 0) {
-    const { data: setLogs } = await supabase
-      .from('set_logs')
-      .select('session_id, exercise_id, actual_weight, actual_reps')
-      .in('session_id', allSessionIds);
+    const setLogs = await fetchAllPaginatedRowsForValues<SetLogRow, string>(
+      allSessionIds,
+      (chunk, from, to) =>
+        supabase
+          .from('set_logs')
+          .select('id, session_id, exercise_id, actual_weight, actual_reps')
+          .in('session_id', chunk)
+          .order('id', { ascending: true })
+          .range(from, to),
+    );
 
     const exerciseIds = Array.from(
       new Set(
-        ((setLogs ?? []) as SetLogRow[])
+        setLogs
           .map((setLog) => setLog.exercise_id)
           .filter((exerciseId): exerciseId is string => Boolean(exerciseId)),
       ),
     );
 
-    const { data: exercises } =
+    const exercises =
       exerciseIds.length > 0
-        ? await supabase
-            .from('exercises')
-            .select('id, name, primary_muscle, secondary_muscles')
-            .in('id', exerciseIds)
-        : { data: [] as ExerciseRow[] };
+        ? await fetchAllPaginatedRowsForValues<ExerciseRow, string>(
+            exerciseIds,
+            (chunk, from, to) =>
+              supabase
+                .from('exercises')
+                .select('id, name, primary_muscle, secondary_muscles')
+                .in('id', chunk)
+                .order('id', { ascending: true })
+                .range(from, to),
+          )
+        : [];
 
     const exerciseMap = new Map(
-      ((exercises ?? []) as ExerciseRow[]).map((exercise) => [exercise.id, exercise]),
+      exercises.map((exercise) => [exercise.id, exercise]),
     );
 
-    for (const setLog of (setLogs ?? []) as SetLogRow[]) {
+    for (const setLog of setLogs) {
       const weight = Number(setLog.actual_weight) || 0;
       const reps = Number(setLog.actual_reps) || 0;
       const setVolume = weight * reps;

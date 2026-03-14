@@ -1,5 +1,9 @@
 import { supabase } from './supabase';
 import { startOfWeek, startOfMonth, endOfMonth, endOfWeek, format, parseISO } from 'date-fns';
+import {
+  fetchAllPaginatedRows,
+  fetchAllPaginatedRowsForValues,
+} from '@/utils/supabasePagination';
 
 export interface MuscleDistributionEntry {
   muscle: string;
@@ -22,53 +26,83 @@ export async function calculateMuscleDistribution(
   userId: string,
   period: 'week' | 'month' | 'all' = 'month'
 ): Promise<MuscleDistributionEntry[]> {
-  let query = supabase
-    .from('workout_sessions')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('completed', true)
-    .or('is_rest_day.is.null,is_rest_day.eq.false');
-
-  if (period === 'week') {
-    const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-    const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
-    query = query
-      .gte('date', format(weekStart, 'yyyy-MM-dd'))
-      .lte('date', format(weekEnd, 'yyyy-MM-dd'));
-  } else if (period === 'month') {
-    const cutoff = new Date();
+  const now = new Date();
+  const weekStart =
+    period === 'week' ? startOfWeek(now, { weekStartsOn: 1 }) : null;
+  const weekEnd =
+    period === 'week' ? endOfWeek(now, { weekStartsOn: 1 }) : null;
+  const monthCutoff = (() => {
+    if (period !== 'month') return null;
+    const cutoff = new Date(now);
     cutoff.setDate(cutoff.getDate() - 30);
-    query = query.gte('date', cutoff.toISOString().split('T')[0]);
-  }
+    return cutoff;
+  })();
 
-  const { data: sessions } = await query;
+  const sessions = await fetchAllPaginatedRows<{ id: string }>((from, to) => {
+    let query = supabase
+      .from('workout_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .order('date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to);
+
+    if (period === 'week' && weekStart && weekEnd) {
+      query = query
+        .gte('date', format(weekStart, 'yyyy-MM-dd'))
+        .lte('date', format(weekEnd, 'yyyy-MM-dd'));
+    } else if (period === 'month' && monthCutoff) {
+      query = query.gte('date', monthCutoff.toISOString().split('T')[0]);
+    }
+
+    return query;
+  });
+
   if (!sessions || sessions.length === 0) return [];
 
   const sessionIds = sessions.map((s) => s.id);
-  const { data: sets } = await supabase
-    .from('set_logs')
-    .select('session_id, exercise_id, actual_weight, actual_reps')
-    .in('session_id', sessionIds);
+  const sets = await fetchAllPaginatedRowsForValues<{
+    session_id: string;
+    exercise_id: string | null;
+    actual_weight: number | null;
+    actual_reps: number | null;
+  }, string>(sessionIds, (chunk, from, to) =>
+    supabase
+      .from('set_logs')
+      .select('id, session_id, exercise_id, actual_weight, actual_reps')
+      .in('session_id', chunk)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
-  const exerciseIds = [...new Set((sets || []).map((s: any) => s.exercise_id).filter(Boolean))];
+  const exerciseIds = [...new Set(sets.map((s) => s.exercise_id).filter(Boolean))] as string[];
   if (exerciseIds.length === 0) return [];
 
-  const { data: exercises } = await supabase
-    .from('exercises')
-    .select('id, primary_muscle, secondary_muscles')
-    .in('id', exerciseIds);
-  const exMap = new Map((exercises || []).map((e: any) => [e.id, e]));
+  const exercises = await fetchAllPaginatedRowsForValues<{
+    id: string;
+    primary_muscle: string | null;
+    secondary_muscles: string[] | null;
+  }, string>(exerciseIds, (chunk, from, to) =>
+    supabase
+      .from('exercises')
+      .select('id, primary_muscle, secondary_muscles')
+      .in('id', chunk)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
+  const exMap = new Map(exercises.map((e) => [e.id, e]));
 
   const byMuscle = new Map<string, number>();
   let total = 0;
 
-  for (const set of sets || []) {
-    const s = set as any;
-    const w = Number(s.actual_weight) || 0;
-    const r = Number(s.actual_reps) || 0;
+  for (const set of sets) {
+    const w = Number(set.actual_weight) || 0;
+    const r = Number(set.actual_reps) || 0;
     const vol = w * r;
     if (vol <= 0) continue;
-    const ex = exMap.get(s.exercise_id);
+    const ex = exMap.get(set.exercise_id ?? '');
     const primary = ex?.primary_muscle;
     const secondaries = (ex?.secondary_muscles as string[]) || [];
     if (primary) {
@@ -100,12 +134,21 @@ export async function getVolumeChartData(
   userId: string,
   period: 'week' | 'month' | 'year'
 ): Promise<{ entries: VolumeEntry[]; total: number }> {
-  const { data: sessions } = await supabase
-    .from('workout_sessions')
-    .select('id, date, total_volume')
-    .eq('user_id', userId)
-    .eq('completed', true)
-    .or('is_rest_day.is.null,is_rest_day.eq.false');
+  const sessions = await fetchAllPaginatedRows<{
+    id: string;
+    date: string;
+    total_volume: number | null;
+  }>((from, to) =>
+    supabase
+      .from('workout_sessions')
+      .select('id, date, total_volume')
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .order('date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
 
   if (!sessions || sessions.length === 0) {
     if (period === 'week')
@@ -125,7 +168,7 @@ export async function getVolumeChartData(
   }
 
   const byDate = new Map<string, number>();
-  for (const s of sessions as any[]) {
+  for (const s of sessions) {
     const d = s.date || '';
     const v = Number(s.total_volume) || 0;
     byDate.set(d, (byDate.get(d) ?? 0) + v);

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { fetchAllPaginatedRows } from '@/utils/supabasePagination';
 
 /**
  * Calculate current streak from workout_sessions.
@@ -6,13 +7,21 @@ import { supabase } from './supabase';
  * - Active Recovery days count if the user logged any workout (e.g. cardio); rest-day-only logs do not extend the streak.
  */
 export async function calculateStreak(userId: string): Promise<number> {
-  const { data: sessions } = await supabase
-    .from('workout_sessions')
-    .select('date, completed, is_rest_day')
-    .eq('user_id', userId)
-    .eq('completed', true)
-    .or('is_rest_day.is.null,is_rest_day.eq.false')
-    .order('date', { ascending: false });
+  const sessions = await fetchAllPaginatedRows<{
+    date: string;
+    completed: boolean | null;
+    is_rest_day: boolean | null;
+  }>((from, to) =>
+    supabase
+      .from('workout_sessions')
+      .select('date, completed, is_rest_day')
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .order('date', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+  );
 
   if (!sessions || sessions.length === 0) return 0;
 

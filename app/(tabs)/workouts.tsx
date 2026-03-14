@@ -17,6 +17,7 @@ import { formatVolumeCompact, type Units } from '@/utils/units';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/services/supabase';
 import { normalizeSavedWorkoutExercises } from '@/services/savedWorkouts';
+import { fetchAllPaginatedRows } from '@/utils/supabasePagination';
 
 interface PastWorkoutRow {
   id: string;
@@ -56,17 +57,20 @@ export default function WorkoutsScreen() {
     if (!session?.user?.id) return;
     const userId = session.user.id;
 
-    const { data: raw } = await supabase
-      .from('workout_sessions')
-      .select('id, name, date, duration_seconds, total_volume, exercise_count, pr_count, is_rest_day, is_cardio, completed_at')
-      .eq('user_id', userId)
-      .eq('completed', true)
-      .order('date', { ascending: false })
-      .order('completed_at', { ascending: false })
-      .limit(500);
+    const raw = await fetchAllPaginatedRows<PastWorkoutRow>((from, to) =>
+      supabase
+        .from('workout_sessions')
+        .select('id, name, date, duration_seconds, total_volume, exercise_count, pr_count, is_rest_day, is_cardio, completed_at')
+        .eq('user_id', userId)
+        .eq('completed', true)
+        .order('date', { ascending: false })
+        .order('completed_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+    );
 
     if (raw) {
-      const workoutsOnly = (raw as PastWorkoutRow[]).filter((s) => !s.is_rest_day);
+      const workoutsOnly = raw.filter((s) => !s.is_rest_day);
       workoutsOnly.sort((a, b) => {
         const d = b.date.localeCompare(a.date);
         if (d !== 0) return d;

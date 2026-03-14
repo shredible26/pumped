@@ -40,6 +40,25 @@ function groupSetsByExercise(sets: SetLog[]): { name: string; sets: SetLog[] }[]
   });
 }
 
+function formatLoggedSetValue(set: SetLog, units: Units): string {
+  const seconds = set.actual_seconds != null ? Number(set.actual_seconds) : null;
+  if (seconds != null && seconds > 0) {
+    return `${seconds}s`;
+  }
+
+  const reps = set.actual_reps != null ? Number(set.actual_reps) : null;
+  const weight = set.actual_weight != null ? Number(set.actual_weight) : null;
+
+  if (reps != null && reps > 0) {
+    if (weight != null && weight > 0) {
+      return `${formatWeight(weight, units)} × ${reps} reps`;
+    }
+    return `${reps} reps`;
+  }
+
+  return '—';
+}
+
 export default function SessionDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -248,11 +267,7 @@ export default function SessionDetailScreen() {
                     <View key={set.id} style={styles.setRow}>
                       <Text style={styles.setLabel}>Set {set.set_number}</Text>
                       <Text style={styles.setValue}>
-                        {set.actual_seconds != null
-                          ? `${set.actual_seconds}s`
-                          : set.actual_weight != null && set.actual_reps != null
-                            ? `${formatWeight(set.actual_weight, units)} × ${set.actual_reps} reps`
-                            : '—'}
+                        {formatLoggedSetValue(set, units)}
                       </Text>
                       {set.is_pr && (
                         <View style={styles.prBadge}>

@@ -238,7 +238,7 @@ export default function ProfileScreen() {
     if (!session?.user?.id) return;
     try {
       const stats = await fetchDashboardStats(session.user.id);
-      setVolumeTotal(stats.weeklyVolumeTotal);
+      setVolumeTotal(stats.volumeTotal);
       setWorkoutCount(stats.workoutCount);
     } catch {
       setVolumeTotal(null);
