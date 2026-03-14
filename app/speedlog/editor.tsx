@@ -26,10 +26,8 @@ import { createSession, insertSetLogs, completeSession } from '@/services/workou
 import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
 import { getLocalDateString } from '@/utils/date';
 import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
-import { updateProfileStreak } from '@/services/streak';
-import { supabase } from '@/services/supabase';
+import { recalculateProfileMetrics } from '@/services/profileMetrics';
 import { Exercise } from '@/types/exercise';
-import { e1rm } from '@/utils/epley';
 import { clearActiveWorkout } from '@/utils/storage';
 import {
   durationPartsToSeconds,
@@ -288,23 +286,10 @@ export default function SpeedLogEditorScreen() {
       const completedAtForStrain = new Date(sessionDate + 'T12:00:00');
       await recordWorkoutStrain(userId, ws.id, completedAtForStrain).catch(() => {});
 
-      const prevTotal = profile?.total_workouts ?? 0;
-      await supabase
-        .from('profiles')
-        .update({
-          total_workouts: prevTotal + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId);
-
-      const streakResult = await updateProfileStreak(userId);
-
-      const { data: updated } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      if (updated) setProfile({ ...updated, ...streakResult } as any);
+      const updatedProfile = await recalculateProfileMetrics(userId, {
+        preserveExistingBigThree: true,
+      });
+      if (updatedProfile) setProfile(updatedProfile as any);
 
       clearActiveWorkout();
 
@@ -582,13 +567,11 @@ export default function SpeedLogEditorScreen() {
                       {muscle.replace('_', ' ').toUpperCase()}
                     </Text>
                     {exList.map((ex) => {
-                      const added = exercises.some((e) => e.exercise.id === ex.id);
                       return (
                         <Pressable
                           key={ex.id}
                           style={styles.searchItem}
                           onPress={() => addExercise(ex)}
-                          disabled={added}
                         >
                           <View style={{ flex: 1 }}>
                             <Text style={styles.searchItemName}>{ex.name}</Text>
@@ -596,11 +579,6 @@ export default function SpeedLogEditorScreen() {
                               {ex.equipment} · {ex.difficulty}
                             </Text>
                           </View>
-                          <Ionicons
-                            name={added ? 'checkmark-circle' : 'add-circle-outline'}
-                            size={22}
-                            color={added ? colors.accent.primary : colors.text.tertiary}
-                          />
                         </Pressable>
                       );
                     })}

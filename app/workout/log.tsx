@@ -27,7 +27,7 @@ import {
   completeSession,
 } from '@/services/workouts';
 import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
-import { updateProfileStreak } from '@/services/streak';
+import { recalculateProfileMetrics } from '@/services/profileMetrics';
 import { supabase } from '@/services/supabase';
 import { generateWorkoutNameFromExercises } from '@/utils/workoutName';
 import { getLocalDateString } from '@/utils/date';
@@ -306,23 +306,10 @@ export default function WorkoutLogScreen() {
       await applyWorkoutFatigue(session.user.id, contributions).catch(() => {});
       await recordWorkoutStrain(session.user.id, ws.id, new Date()).catch(() => {});
 
-      const prevTotal = profile?.total_workouts ?? 0;
-      await supabase
-        .from('profiles')
-        .update({
-          total_workouts: prevTotal + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', session.user.id);
-
-      const streakResult = await updateProfileStreak(session.user.id);
-
-      const { data: updated } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-      if (updated) setProfile({ ...updated, ...streakResult } as any);
+      const updatedProfile = await recalculateProfileMetrics(session.user.id, {
+        preserveExistingBigThree: true,
+      });
+      if (updatedProfile) setProfile(updatedProfile as any);
 
       const today = getLocalDateString();
       await supabase

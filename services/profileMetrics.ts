@@ -10,6 +10,10 @@ interface SessionRow {
 
 type Big3Lift = 'squat' | 'bench' | 'deadlift';
 
+interface RecalculateProfileMetricsOptions {
+  preserveExistingBigThree?: boolean;
+}
+
 function calculateStreaks(dateStrings: string[]): {
   current_streak_days: number;
   longest_streak_days: number;
@@ -136,20 +140,62 @@ async function calculateLoggedBigThree(sessionIds: string[]): Promise<Record<Big
   return best;
 }
 
-export async function recalculateProfileMetrics(userId: string) {
-  const { data: sessions, error } = await supabase
-    .from('workout_sessions')
-    .select('id, date')
-    .eq('user_id', userId)
-    .eq('completed', true)
-    .or('is_rest_day.is.null,is_rest_day.eq.false')
-    .order('date', { ascending: true });
+export async function recalculateProfileMetrics(
+  userId: string,
+  options?: RecalculateProfileMetricsOptions,
+) {
+  const [{ data: sessions, error }, { data: profile, error: profileError }] = await Promise.all([
+    supabase
+      .from('workout_sessions')
+      .select('id, date')
+      .eq('user_id', userId)
+      .eq('completed', true)
+      .or('is_rest_day.is.null,is_rest_day.eq.false')
+      .order('date', { ascending: true }),
+    supabase
+      .from('profiles')
+      .select(
+        'squat_e1rm, bench_e1rm, deadlift_e1rm, manual_squat_1rm, manual_bench_1rm, manual_deadlift_1rm',
+      )
+      .eq('id', userId)
+      .single(),
+  ]);
 
   if (error) throw error;
+  if (profileError) throw profileError;
 
   const sessionRows = (sessions ?? []) as SessionRow[];
   const streaks = calculateStreaks(sessionRows.map((session) => session.date));
-  const bigThree = await calculateLoggedBigThree(sessionRows.map((session) => session.id));
+  const loggedBigThree = await calculateLoggedBigThree(sessionRows.map((session) => session.id));
+  const preserveExistingBigThree = options?.preserveExistingBigThree ?? false;
+
+  const currentBigThree: Record<Big3Lift, number> = {
+    squat: Number(profile?.squat_e1rm) || 0,
+    bench: Number(profile?.bench_e1rm) || 0,
+    deadlift: Number(profile?.deadlift_e1rm) || 0,
+  };
+  const manualBigThree: Record<Big3Lift, number> = {
+    squat: Number(profile?.manual_squat_1rm) || 0,
+    bench: Number(profile?.manual_bench_1rm) || 0,
+    deadlift: Number(profile?.manual_deadlift_1rm) || 0,
+  };
+  const bigThree: Record<Big3Lift, number> = {
+    squat: Math.max(
+      loggedBigThree.squat,
+      manualBigThree.squat,
+      preserveExistingBigThree ? currentBigThree.squat : 0,
+    ),
+    bench: Math.max(
+      loggedBigThree.bench,
+      manualBigThree.bench,
+      preserveExistingBigThree ? currentBigThree.bench : 0,
+    ),
+    deadlift: Math.max(
+      loggedBigThree.deadlift,
+      manualBigThree.deadlift,
+      preserveExistingBigThree ? currentBigThree.deadlift : 0,
+    ),
+  };
   const strengthScore = bigThree.squat + bigThree.bench + bigThree.deadlift;
 
   const updates = {

@@ -59,7 +59,8 @@ export async function getBig3(userId: string): Promise<Big3Result> {
     .from('workout_sessions')
     .select('id, date')
     .eq('user_id', userId)
-    .eq('completed', true);
+    .eq('completed', true)
+    .or('is_rest_day.is.null,is_rest_day.eq.false');
 
   if (!sessions || sessions.length === 0) {
     for (const lift of ['squat', 'bench', 'deadlift'] as Big3Lift[]) {

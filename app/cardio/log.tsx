@@ -18,15 +18,13 @@ import { DurationInput } from '@/components/ui/DurationInput';
 import { useAuthStore } from '@/stores/authStore';
 import { fetchCardioExercises } from '@/services/exercises';
 import { createSession } from '@/services/workouts';
-import { updateProfileStreak } from '@/services/streak';
-import { supabase } from '@/services/supabase';
+import { recalculateProfileMetrics } from '@/services/profileMetrics';
 import { getLocalDateString } from '@/utils/date';
 import { Exercise } from '@/types/exercise';
 
 export default function CardioLogScreen() {
   const router = useRouter();
   const session = useAuthStore((s) => s.session);
-  const profile = useAuthStore((s) => s.profile);
   const setProfile = useAuthStore((s) => s.setProfile);
 
   const [cardioExercises, setCardioExercises] = useState<Exercise[]>([]);
@@ -72,13 +70,10 @@ export default function CardioLogScreen() {
         completed_at: new Date().toISOString(),
       });
 
-      const streakResult = await updateProfileStreak(session.user.id);
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
-      if (profileData) setProfile({ ...profileData, ...streakResult } as any);
+      const updatedProfile = await recalculateProfileMetrics(session.user.id, {
+        preserveExistingBigThree: true,
+      });
+      if (updatedProfile) setProfile(updatedProfile as any);
 
       router.replace(`/workout/summary?sessionId=${ws.id}`);
     } catch (err: any) {

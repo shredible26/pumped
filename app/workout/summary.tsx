@@ -17,7 +17,7 @@ import { useWorkoutStore } from '@/stores/workoutStore';
 import { useAuthStore } from '@/stores/authStore';
 import { completeSession, insertSetLogs } from '@/services/workouts';
 import { applyWorkoutFatigue, recordWorkoutStrain } from '@/services/fatigue';
-import { updateProfileStreak } from '@/services/streak';
+import { recalculateProfileMetrics } from '@/services/profileMetrics';
 import { fetchExercises } from '@/services/exercises';
 import type { SavedWorkoutExercise, SavedWorkoutSetDetail } from '@/services/savedWorkouts';
 import { supabase } from '@/services/supabase';
@@ -369,43 +369,21 @@ export default function WorkoutSummaryScreen() {
         console.warn('Failed to update fatigue:', e);
       }
 
-      // Update profile
       const prevScore = profile?.strength_score ?? 0;
-      const newScore = newSquat + newBench + newDeadlift;
-      const prevTotal = profile?.total_workouts ?? 0;
-
-      const streakResult = await updateProfileStreak(userId);
-
-      const profileUpdates: any = {
-        total_workouts: prevTotal + 1,
-        current_streak_days: streakResult.current_streak_days,
-        longest_streak_days: streakResult.longest_streak_days,
-        updated_at: new Date().toISOString(),
-      };
-
-      if (newSquat !== (profile?.squat_e1rm ?? 0)) profileUpdates.squat_e1rm = newSquat;
-      if (newBench !== (profile?.bench_e1rm ?? 0)) profileUpdates.bench_e1rm = newBench;
-      if (newDeadlift !== (profile?.deadlift_e1rm ?? 0)) profileUpdates.deadlift_e1rm = newDeadlift;
-      if (newScore !== prevScore) profileUpdates.strength_score = newScore;
-
-      await supabase.from('profiles').update(profileUpdates).eq('id', userId);
-
-      // Refresh local profile
-      const { data: updatedProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
+      const updatedProfile = await recalculateProfileMetrics(userId, {
+        preserveExistingBigThree: true,
+      });
       if (updatedProfile) setProfile(updatedProfile as any);
+      const newScore = Number(updatedProfile?.strength_score ?? 0);
 
       // Strength history record
-      if (newScore > 0) {
+      if (updatedProfile && newScore > 0) {
         try {
           await supabase.from('strength_history').insert({
             user_id: userId,
-            squat_e1rm: newSquat || null,
-            bench_e1rm: newBench || null,
-            deadlift_e1rm: newDeadlift || null,
+            squat_e1rm: Number(updatedProfile.squat_e1rm) || null,
+            bench_e1rm: Number(updatedProfile.bench_e1rm) || null,
+            deadlift_e1rm: Number(updatedProfile.deadlift_e1rm) || null,
             total_score: newScore,
           });
         } catch {}
@@ -422,7 +400,7 @@ export default function WorkoutSummaryScreen() {
         prs,
         newStrengthScore: newScore > 0 ? newScore : null,
         prevStrengthScore: prevScore > 0 ? prevScore : null,
-        streak: streakResult.current_streak_days,
+        streak: Number(updatedProfile?.current_streak_days ?? 0),
       };
 
       setSummary(summaryData);

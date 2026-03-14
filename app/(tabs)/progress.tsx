@@ -192,10 +192,16 @@ export default function ProgressScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      resetStrengthTrendSelection();
-      if (!session?.user?.id || hasLoadedProgressRef.current) return;
-      hasLoadedProgressRef.current = true;
-      void fetchDataRef.current?.({ preserveStrengthSelection: false });
+      if (!session?.user?.id) return;
+
+      if (!hasLoadedProgressRef.current) {
+        resetStrengthTrendSelection();
+        hasLoadedProgressRef.current = true;
+        void fetchDataRef.current?.({ preserveStrengthSelection: false });
+        return;
+      }
+
+      void fetchDataRef.current?.({ preserveStrengthSelection: true });
     }, [session?.user?.id, resetStrengthTrendSelection]),
   );
 
@@ -466,10 +472,22 @@ export default function ProgressScreen() {
               <Text style={styles.scoreNumber}>{Math.round(big3.total).toLocaleString()}</Text>
             </View>
             {[
-              { key: 'squat' as const, name: 'Squat' },
-              { key: 'bench' as const, name: 'Bench Press' },
-              { key: 'deadlift' as const, name: 'Deadlift' },
-            ].map(({ key, name }) => {
+              {
+                key: 'squat' as const,
+                name: 'Barbell Squat',
+                trackPrompt: 'barbell squat',
+              },
+              {
+                key: 'bench' as const,
+                name: 'Barbell Bench Press',
+                trackPrompt: 'barbell bench press',
+              },
+              {
+                key: 'deadlift' as const,
+                name: 'Deadlift',
+                trackPrompt: 'deadlift',
+              },
+            ].map(({ key, name, trackPrompt }) => {
               const entry = big3[key];
               return (
                 <View key={key} style={styles.liftCard}>
@@ -482,7 +500,7 @@ export default function ProgressScreen() {
                       ? entry.date
                         ? `${entry.source} on ${entry.date}`
                         : entry.source
-                      : `Log a ${key} to track`}
+                      : `Log a ${trackPrompt} to track`}
                   </Text>
                 </View>
               );
@@ -492,7 +510,7 @@ export default function ProgressScreen() {
           <View style={styles.emptyBig3}>
             <Ionicons name="trophy-outline" size={36} color={colors.text.tertiary} />
             <Text style={styles.emptyBig3Text}>
-              Log bench, squat, or deadlift to see your Big 3.
+              Log a barbell squat, barbell bench press, or deadlift to see your Big 3.
             </Text>
           </View>
         )}
