@@ -123,4 +123,5 @@ utils/          theme, date, schedule, workoutName, units, epley, recoveryModel
 - Workouts, sets, profile, fatigue, streaks, and AI plans are stored in Supabase keyed by user. Sign out clears local state; signing back in loads that user’s data. Active workout draft is cleared on sign out.
 
 ### TODO
-- Change the display exercise logic in the screen after 'Add Exercise'. The tag at the top of the exercise list, it should say 'recommended' and then the first several exercises should be common recorded (push/pull/upper, etc) day exercises. The recommended portion should only contain about 7 or so exercises, and then if the user scrolls down then it should start categorizing exercises by muscle group or cardio (abs, calves, etc). After the 'recommended' portion of exercises, It should be filtered alphabetically by muscle group (+ cardio). The list should always contain every single exercise available and all other components should remain untouched (search, buttons, etc). Apply to every screen where this is applicable. 
+- for Speed Log, move everything down to the center of the screen without changing any of the UI (size, etc).  
+- Add image/video for each exercise
