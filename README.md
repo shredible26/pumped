@@ -1,6 +1,7 @@
-# Pumped
+# PUMPED
 
-AI-powered fitness app built with Expo, React Native, and TypeScript.
+## AI-powered Adaptive Fitness Companion 
+Built with Expo, React Native, and TypeScript.
 
 ## Prerequisites
 
@@ -17,21 +18,7 @@ AI-powered fitness app built with Expo, React Native, and TypeScript.
 npm install
 ```
 
-### 2. Configure environment variables
-
-Copy the placeholder `.env` file or create one in the project root:
-
-```bash
-# .env
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url_here
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
-```
-
-The app will scaffold and navigate without real Supabase credentials, but auth and data features require a live Supabase project.
-
-**Auth (optional):** To let users sign in immediately after signup without verifying their email, in the [Supabase Dashboard](https://supabase.com/dashboard) go to **Authentication → Providers → Email** and turn **off** “Confirm email”.
-
-### 3. Start the dev server
+### 2. Start the dev server
 
 ```bash
 npm start
@@ -39,7 +26,7 @@ npm start
 
 This runs `expo start` and prints a QR code in your terminal.
 
-### 4. Open on a physical device
+### 3. Open on a physical device
 
 1. Make sure your phone and computer are on the **same Wi-Fi network**.
 2. Open the **Expo Go** app on your phone.
@@ -50,26 +37,6 @@ This runs `expo start` and prints a QR code in your terminal.
 ```bash
 npx expo start --tunnel
 ```
-
-Tunnel uses a public URL so the phone doesn’t need to reach your machine on the local network. It’s useful when Wi‑Fi isolation, firewalls, or VPNs block local access. The first tunnel connection may take a bit longer to establish.
-
-### 5. Open in iOS Simulator (requires Xcode)
-
-Press `i` in the terminal after the dev server starts, or run:
-
-```bash
-npm run ios
-```
-
-### 6. Open in Android Emulator
-
-Press `a` in the terminal after the dev server starts, or run:
-
-```bash
-npm run android
-```
-
-> **Note:** Some native modules (`react-native-mmkv`, `expo-haptics`, `expo-secure-store`) require a development build to work fully. Expo Go supports most features but may show warnings for unsupported native modules. To create a dev build: `npx expo run:ios` or `npx expo run:android`.
 
 ## Project Structure
 
@@ -124,4 +91,5 @@ utils/          theme, date, schedule, workoutName, units, epley, recoveryModel
 
 ### TODO
 - for Speed Log, move everything down to the center of the screen without changing any of the UI (size, etc).  
-- Add image/video for each exercise
+- Add image + video + explanation for each exercise
+- Add a 'Primary fitness goal' section to the signup screen right before the user chooses what split they want and the number of days per week. Update the AI workout generation and everything else that is AI generated (Insights, etc) to include the users specific chosen primary goal in the AI logic/output. For the workouts, all generated workouts (unless specified) should incorporate the goal or work towards the goal in some way. This should be included in the description / in the 'Why' section (when a user clicks on 'why' for a specific exercise) whenever applicable. Design this properly and make sure that all AI calls are always inclusive of all available user data. Design this strategically as well, however you think best. I want this app (pumped) to stand out from others, almost like the weight-lifting/fitness equivalent of Strava, and I want all of the AI components to be extremely professional and well thought out; using all of the best tecniques and capabilities. Lastly, make this selection optional and if the user does not have a primary goal chosen, then all insights/AI-generation should be done without this. 
