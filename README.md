@@ -24,7 +24,14 @@ npm install
 npm start
 ```
 
-This runs `expo start` and prints a QR code in your terminal.
+This runs `expo start --tunnel` and prints a QR code in your terminal.
+
+Use these alternatives when needed:
+
+```bash
+npm run start:tunnel  # works across different networks; most reliable for phones
+npm run start:lan     # fastest when phone + laptop are on same Wi-Fi
+```
 
 ### 3. Open on a physical device
 
@@ -32,11 +39,7 @@ This runs `expo start` and prints a QR code in your terminal.
 2. Open the **Expo Go** app on your phone.
 3. Scan the QR code shown in the terminal (iOS Camera app also works).
 
-**If the app never loads or times out** when using `npx expo start` (local network), try:
-
-```bash
-npx expo start --tunnel
-```
+If the app is stuck at "Downloading update" or "Could not connect to development server", use tunnel mode (`npm start` or `npm run start:tunnel`).
 
 ## Project Structure
 

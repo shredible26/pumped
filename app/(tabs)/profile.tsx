@@ -59,19 +59,29 @@ export default function ProfileScreen() {
   const [workoutCount, setWorkoutCount] = useState(0);
   const autoRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const runSignOut = useCallback(async () => {
+    try {
+      await signOut();
+    } catch (err: unknown) {
+      Alert.alert('Error', (err as Error)?.message || 'Failed to sign out.');
+    }
+  }, [signOut]);
+
   const handleSignOut = () => {
+    if (Platform.OS === 'web') {
+      const shouldSignOut = globalThis.confirm?.('Are you sure you want to sign out?') ?? true;
+      if (shouldSignOut) {
+        void runSignOut();
+      }
+      return;
+    }
+
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
         style: 'destructive',
-        onPress: async () => {
-          try {
-            await signOut();
-          } catch (err: unknown) {
-            Alert.alert('Error', (err as Error)?.message || 'Failed to sign out.');
-          }
-        },
+        onPress: () => void runSignOut(),
       },
     ]);
   };
